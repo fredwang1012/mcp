@@ -18,7 +18,6 @@ from mcp.server.fastmcp.utilities.logging import configure_logging
 from mcp.server.models import InitializationOptions
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp.server.session import ServerSession
-from starlette.responses import HTMLResponse
 
 import mcp.types as types
 
@@ -102,7 +101,7 @@ class DatabricksMCP(FastMCP):
         self.settings = Settings(**settings)
 
         self._mcp_server = ServerWithHeaders(
-            name=name or "FastMCP",
+            name=name or "DatabricksMCP",
             instructions=instructions,
             lifespan=(
                 lifespan_wrapper(self, self.settings.lifespan)
