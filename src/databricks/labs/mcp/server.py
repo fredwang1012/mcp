@@ -47,7 +47,7 @@ class UserInfo(BaseModel):
 class SessionWithHeaders(ServerSession):
     def __init__(self, *args, **kwargs):
 
-        logger.info("Initializing RezonanzSession")
+        logger.info("Initializing the session")
         if "headers" in kwargs:
             self.headers = kwargs.pop("headers")
             logger.debug(f"Session header keys: {self.headers.keys()}")
