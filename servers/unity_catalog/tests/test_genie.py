@@ -1,6 +1,7 @@
-from pydantic import BaseModel
-from unitycatalog_mcp.tools.genie import list_genie_tools, GenieTool, dump_json
 from unittest import mock
+
+from pydantic import BaseModel
+from unitycatalog_mcp.tools.genie import GenieTool, dump_json, list_genie_tools
 
 
 class DummySettings:

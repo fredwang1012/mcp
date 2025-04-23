@@ -1,15 +1,16 @@
 import functools
-import time
 import json
 import logging
+import time
 from typing import Union
-from pydantic import BaseModel, Field
-from pydantic.json import pydantic_encoder
 
 from databricks.sdk import WorkspaceClient
-from mcp.types import TextContent, Tool as ToolSpec
-
+from pydantic import BaseModel, Field
+from pydantic.json import pydantic_encoder
 from unitycatalog_mcp.tools.base_tool import BaseTool
+
+from mcp.types import TextContent
+from mcp.types import Tool as ToolSpec
 
 # Logger
 LOGGER = logging.getLogger(__name__)
@@ -99,9 +100,7 @@ def _start_conversation(client, args) -> list[TextContent]:
 
 def _create_message(client, args) -> list[TextContent]:
     model = CreateMessageInput.model_validate(args)
-    message = client.genie.create_message_and_wait(
-        model.space_id, model.conversation_id, model.content
-    )
+    message = client.genie.create_message_and_wait(model.space_id, model.conversation_id, model.content)
     return [
         TextContent(
             type="text",
@@ -120,9 +119,7 @@ def _create_message(client, args) -> list[TextContent]:
 
 def _get_message(client, args) -> list[TextContent]:
     model = GetMessageInput.model_validate(args)
-    message = client.genie.get_message(
-        model.space_id, model.conversation_id, model.message_id
-    )
+    message = client.genie.get_message(model.space_id, model.conversation_id, model.message_id)
     return [
         TextContent(
             type="text",
@@ -218,9 +215,7 @@ def _poll_message_until_complete(client, args) -> list[TextContent]:
     poll_count = 0
 
     while elapsed < model.timeout_seconds:
-        message = genie_api.get_message(
-            model.space_id, model.conversation_id, model.message_id
-        )
+        message = genie_api.get_message(model.space_id, model.conversation_id, model.message_id)
         status = message.status.value if message.status else "UNKNOWN"
         poll_count += 1
 

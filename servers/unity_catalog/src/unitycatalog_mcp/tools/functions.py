@@ -1,9 +1,11 @@
 import logging
 
-from mcp.types import Tool as ToolSpec, TextContent
-from unitycatalog_mcp.tools.base_tool import BaseTool
-from unitycatalog.ai.core.databricks import DatabricksFunctionClient
 from databricks_openai import UCFunctionToolkit
+from unitycatalog.ai.core.databricks import DatabricksFunctionClient
+from unitycatalog_mcp.tools.base_tool import BaseTool
+
+from mcp.types import TextContent
+from mcp.types import Tool as ToolSpec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,13 +25,9 @@ class UCFunctionTool(BaseTool):
         super().__init__(tool_spec=tool_spec)
 
     def execute(self, **kwargs) -> list[TextContent]:
-        res = self.client.execute_function(
-            function_name=self.uc_function_name, parameters=kwargs
-        )
+        res = self.client.execute_function(function_name=self.uc_function_name, parameters=kwargs)
         if res.error:
-            raise Exception(
-                f"Error while executing {self.uc_function_name}: {res.error}"
-            )
+            raise Exception(f"Error while executing {self.uc_function_name}: {res.error}")
         return [
             TextContent(
                 type="text",
@@ -43,13 +41,8 @@ def _list_uc_function_tools(
     catalog_name: str,
     schema_name: str,
 ) -> list[UCFunctionTool]:
-    toolkit = UCFunctionToolkit(
-        client=client, function_names=[f"{catalog_name}.{schema_name}.*"]
-    )
-    return [
-        UCFunctionTool(tool_obj, client, name)
-        for name, tool_obj in toolkit.tools_dict.items()
-    ]
+    toolkit = UCFunctionToolkit(client=client, function_names=[f"{catalog_name}.{schema_name}.*"])
+    return [UCFunctionTool(tool_obj, client, name) for name, tool_obj in toolkit.tools_dict.items()]
 
 
 def list_uc_function_tools(settings) -> list[UCFunctionTool]:

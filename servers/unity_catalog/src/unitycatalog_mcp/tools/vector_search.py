@@ -2,12 +2,12 @@ import io
 import json
 from contextlib import redirect_stdout
 
-from databricks_openai import VectorSearchRetrieverTool
 from databricks.sdk import WorkspaceClient
-
-from mcp.types import Tool as ToolSpec, TextContent
-
+from databricks_openai import VectorSearchRetrieverTool
 from unitycatalog_mcp.tools.base_tool import BaseTool
+
+from mcp.types import TextContent
+from mcp.types import Tool as ToolSpec
 
 
 class VectorSearchTool(BaseTool):
@@ -44,9 +44,7 @@ def _list_vector_search_tools(
     workspace_client: WorkspaceClient, catalog_name: str, schema_name: str
 ) -> list[VectorSearchTool]:
     tools = []
-    for table in workspace_client.tables.list(
-        catalog_name=catalog_name, schema_name=schema_name
-    ):
+    for table in workspace_client.tables.list(catalog_name=catalog_name, schema_name=schema_name):
         # TODO: support filtering tables by securable kind (e.g. by making securable
         # kind accessible here)
         if not table.properties or "model_endpoint_url" not in table.properties:

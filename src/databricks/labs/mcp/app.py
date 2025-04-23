@@ -1,6 +1,5 @@
 from databricks.labs.mcp.server import DatabricksMCP
 
-
 mcp = DatabricksMCP("DatabricksMCP")
 
 

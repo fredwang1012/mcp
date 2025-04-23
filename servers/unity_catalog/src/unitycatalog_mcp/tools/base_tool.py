@@ -1,7 +1,7 @@
-from mcp.types import Tool as ToolSpec
-
 # Define a new abstract class for a tool
 from abc import ABC, abstractmethod
+
+from mcp.types import Tool as ToolSpec
 
 
 class BaseTool(ABC):

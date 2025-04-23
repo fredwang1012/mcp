@@ -1,9 +1,10 @@
-from typing import List, Optional
-from pydantic import field_validator
 from functools import lru_cache
+from typing import List, Optional
+
 from pydantic import (
-    Field,
     AliasChoices,
+    Field,
+    field_validator,
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,9 +47,7 @@ class CliSettings(BaseSettings):
     @model_validator(mode="after")
     def check_schema_name_or_genie_space_ids(self):
         if not self.schema_full_name and not self.genie_space_ids:
-            raise ValueError(
-                "At least one of --schema (-s) or --genie-space-ids (-g) must be provided."
-            )
+            raise ValueError("At least one of --schema (-s) or --genie-space-ids (-g) must be provided.")
         return self
 
     @field_validator("schema_full_name", mode="before")

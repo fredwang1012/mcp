@@ -1,18 +1,17 @@
-import logging
 import collections
+import logging
+
+from unitycatalog_mcp.cli import get_settings
+from unitycatalog_mcp.tools import (
+    Content,
+    list_all_tools,
+)
+from unitycatalog_mcp.tools.base_tool import BaseTool
+from unitycatalog_mcp.version import VERSION
 
 from mcp.server import NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool as ToolSpec
-from unitycatalog_mcp.tools import (
-    list_all_tools,
-    Content,
-)
-
-from unitycatalog_mcp.cli import get_settings
-
-from unitycatalog_mcp.tools.base_tool import BaseTool
-from unitycatalog_mcp.version import VERSION
 
 # The logger instance for this module.
 LOGGER = logging.getLogger(__name__)
@@ -20,9 +19,7 @@ LOGGER = logging.getLogger(__name__)
 
 def _warn_if_duplicate_tool_names(tools: list[BaseTool]):
     tool_names = [tool.tool_spec.name for tool in tools]
-    duplicate_tool_names = [
-        item for item, count in collections.Counter(tool_names).items() if count > 1
-    ]
+    duplicate_tool_names = [item for item, count in collections.Counter(tool_names).items() if count > 1]
     if duplicate_tool_names:
         LOGGER.warning(
             f"Duplicate tool names detected: {duplicate_tool_names}. For each duplicate tool name, "
@@ -39,9 +36,7 @@ def get_tools_dict(settings) -> dict[str, BaseTool]:
     # (e.g. function name and vector search index name)
     all_tools = list_all_tools(settings=get_settings())
     _warn_if_duplicate_tool_names(all_tools)
-    return {
-        tool.tool_spec.name: tool for tool in list_all_tools(settings=get_settings())
-    }
+    return {tool.tool_spec.name: tool for tool in list_all_tools(settings=get_settings())}
 
 
 async def start() -> None:
@@ -58,9 +53,7 @@ async def start() -> None:
         return tool.execute(**arguments)
 
     options = server.create_initialization_options(
-        notification_options=NotificationOptions(
-            resources_changed=True, tools_changed=True
-        )
+        notification_options=NotificationOptions(resources_changed=True, tools_changed=True)
     )
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, options, raise_exceptions=True)

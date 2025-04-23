@@ -1,7 +1,8 @@
 import sys
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
-from unittest.mock import patch
 from unitycatalog_mcp.cli import get_settings
 
 
@@ -50,9 +51,7 @@ def test_required_arguments(argv) -> None:
             get_settings()
         errors = exc_info.value.errors()
         assert len(errors) > 0
-        assert any(
-            err["type"] in ("missing", "string_type", "value_error") for err in errors
-        )
+        assert any(err["type"] in ("missing", "string_type", "value_error") for err in errors)
 
 
 @pytest.mark.parametrize(
@@ -74,9 +73,7 @@ def test_required_arguments(argv) -> None:
         (["unitycatalog-mcp", "-s", "catalog.schema"], "catalog", "schema", []),
     ],
 )
-def test_valid_combinations(
-    argv, expected_catalog, expected_schema, expected_genie_space_ids
-) -> None:
+def test_valid_combinations(argv, expected_catalog, expected_schema, expected_genie_space_ids) -> None:
     with patch.object(sys, "argv", argv):
         settings = get_settings()
         assert settings.get_catalog_name() == expected_catalog

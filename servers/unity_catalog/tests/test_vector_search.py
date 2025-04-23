@@ -1,8 +1,9 @@
 from unittest import mock
+
 from unitycatalog_mcp.tools.vector_search import (
+    VectorSearchTool,
     _list_vector_search_tools,
     list_vector_search_tools,
-    VectorSearchTool,
 )
 
 
@@ -15,9 +16,7 @@ class DummyTable:
 class DummyTablesAPI:
     def list(self, catalog_name=None, schema_name=None):
         return [
-            DummyTable(
-                full_name="cat.sch.tbl1", properties={"model_endpoint_url": "url1"}
-            ),
+            DummyTable(full_name="cat.sch.tbl1", properties={"model_endpoint_url": "url1"}),
             DummyTable(full_name="cat.sch.tbl2", properties={}),
         ]
 
@@ -31,9 +30,7 @@ class DummySettings:
     schema_full_name = "cat.sch"
 
 
-@mock.patch(
-    "unitycatalog_mcp.tools.vector_search.WorkspaceClient", new=DummyWorkspaceClient
-)
+@mock.patch("unitycatalog_mcp.tools.vector_search.WorkspaceClient", new=DummyWorkspaceClient)
 @mock.patch("unitycatalog_mcp.tools.vector_search.VectorSearchRetrieverTool")
 def test_list_vector_search_tools_filters_and_returns_expected(
     MockVectorSearchRetrieverTool,
@@ -51,13 +48,9 @@ def test_list_vector_search_tools_filters_and_returns_expected(
 
 
 def test_internal_list_vector_search_tools_direct():
-    with mock.patch(
-        "unitycatalog_mcp.tools.vector_search.VectorSearchRetrieverTool"
-    ) as MockVectorSearchRetrieverTool:
+    with mock.patch("unitycatalog_mcp.tools.vector_search.VectorSearchRetrieverTool") as MockVectorSearchRetrieverTool:
         MockVectorSearchRetrieverTool.side_effect = lambda index_name: mock.Mock(
-            tool={
-                "function": {"name": index_name, "description": "", "parameters": {}}
-            },
+            tool={"function": {"name": index_name, "description": "", "parameters": {}}},
             index_name=index_name,
         )
         client = DummyWorkspaceClient()
@@ -68,9 +61,7 @@ def test_internal_list_vector_search_tools_direct():
 
 def test_vector_search_tool_execute():
     tool_obj = mock.Mock()
-    tool_obj.tool = {
-        "function": {"name": "vs_tool", "description": "", "parameters": {}}
-    }
+    tool_obj.tool = {"function": {"name": "vs_tool", "description": "", "parameters": {}}}
     tool_obj.execute.return_value = [{"foo": "bar"}]
     tool = VectorSearchTool(tool_obj)
     result = tool.execute(query="test")

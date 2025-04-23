@@ -1,7 +1,7 @@
 from unittest import mock
 
 import pytest
-from unitycatalog_mcp.tools.functions import list_uc_function_tools, UCFunctionTool
+from unitycatalog_mcp.tools.functions import UCFunctionTool, list_uc_function_tools
 
 SCHEMA_FULL_NAME = "catalog.schema"
 
@@ -38,21 +38,15 @@ class DummyClient:
                 self.error = error
 
         if "required_parameter" not in parameters:
-            return Result(
-                value=None, error="Missing required parameter 'required_parameter'"
-            )
-        return Result(
-            value=f"executed {function_name} with parameters {parameters}", error=None
-        )
+            return Result(value=None, error="Missing required parameter 'required_parameter'")
+        return Result(value=f"executed {function_name} with parameters {parameters}", error=None)
 
 
 class DummySettings:
     schema_full_name = SCHEMA_FULL_NAME
 
 
-@mock.patch(
-    "unitycatalog_mcp.tools.functions.DatabricksFunctionClient", new=DummyClient
-)
+@mock.patch("unitycatalog_mcp.tools.functions.DatabricksFunctionClient", new=DummyClient)
 @mock.patch("unitycatalog_mcp.tools.functions.UCFunctionToolkit", new=DummyToolkit)
 def test_list_uc_function_tools():
     settings = DummySettings()

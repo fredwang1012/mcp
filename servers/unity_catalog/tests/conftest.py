@@ -1,5 +1,5 @@
 import pytest
-from unitycatalog_mcp.cli import get_settings, CliSettings
+from unitycatalog_mcp.cli import CliSettings, get_settings
 
 
 @pytest.fixture(autouse=True)

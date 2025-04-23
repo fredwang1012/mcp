@@ -1,25 +1,25 @@
+import logging
 from contextlib import AsyncExitStack
 from typing import Any
+
 import anyio
-from mcp.server.fastmcp.server import FastMCP, Settings, lifespan_wrapper, Context
-from mcp.server.lowlevel.server import lifespan as default_lifespan
-from mcp.server.lowlevel import Server
-from pydantic import BaseModel
-from pydantic import BaseModel, SecretStr, EmailStr
-import logging
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+from pydantic import BaseModel, EmailStr, SecretStr
 from starlette.applications import Starlette
 from starlette.requests import Request
-from mcp.server.sse import SseServerTransport
 from starlette.routing import Mount, Route
-from mcp.server.fastmcp.prompts import PromptManager
-from mcp.server.fastmcp.resources import ResourceManager
-from mcp.server.fastmcp.tools import ToolManager
-from mcp.server.fastmcp.utilities.logging import configure_logging
-from mcp.server.models import InitializationOptions
-from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from mcp.server.session import ServerSession
 
 import mcp.types as types
+from mcp.server.fastmcp.prompts import PromptManager
+from mcp.server.fastmcp.resources import ResourceManager
+from mcp.server.fastmcp.server import Context, FastMCP, Settings, lifespan_wrapper
+from mcp.server.fastmcp.tools import ToolManager
+from mcp.server.fastmcp.utilities.logging import configure_logging
+from mcp.server.lowlevel import Server
+from mcp.server.lowlevel.server import lifespan as default_lifespan
+from mcp.server.models import InitializationOptions
+from mcp.server.session import ServerSession
+from mcp.server.sse import SseServerTransport
 
 
 def get_logger():
@@ -27,9 +27,7 @@ def get_logger():
     logger.setLevel(logging.DEBUG)
 
     handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s"
-    )
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     return logger
@@ -75,9 +73,7 @@ class ServerWithHeaders(Server):
         async with AsyncExitStack() as stack:
             lifespan_context = await stack.enter_async_context(self.lifespan(self))
             session = await stack.enter_async_context(
-                SessionWithHeaders(
-                    read_stream, write_stream, initialization_options, headers=headers
-                )
+                SessionWithHeaders(read_stream, write_stream, initialization_options, headers=headers)
             )
 
             async with anyio.create_task_group() as tg:
@@ -95,29 +91,17 @@ class ServerWithHeaders(Server):
 
 class DatabricksMCP(FastMCP):
 
-    def __init__(
-        self, name: str | None = None, instructions: str | None = None, **settings: Any
-    ):
+    def __init__(self, name: str | None = None, instructions: str | None = None, **settings: Any):
         self.settings = Settings(**settings)
 
         self._mcp_server = ServerWithHeaders(
             name=name or "DatabricksMCP",
             instructions=instructions,
-            lifespan=(
-                lifespan_wrapper(self, self.settings.lifespan)
-                if self.settings.lifespan
-                else default_lifespan
-            ),
+            lifespan=(lifespan_wrapper(self, self.settings.lifespan) if self.settings.lifespan else default_lifespan),
         )
-        self._tool_manager = ToolManager(
-            warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools
-        )
-        self._resource_manager = ResourceManager(
-            warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
-        )
-        self._prompt_manager = PromptManager(
-            warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts
-        )
+        self._tool_manager = ToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
+        self._resource_manager = ResourceManager(warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources)
+        self._prompt_manager = PromptManager(warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts)
         self.dependencies = self.settings.dependencies
 
         # Set up MCP protocol handlers
