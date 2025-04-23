@@ -1,15 +1,14 @@
-# Databricks developer tools MCP server
-![status: WIP](https://img.shields.io/badge/status-WIP-red?style=flat-square&logo=databricks)
-
-## 🚧 Work in Progress 🚧
-**This server is still under initial development and must not be shared outside Databricks.**
+# Databricks Unity Catalog MCP server
+![status: Beta](https://img.shields.io/badge/status-Beta-yellow?style=flat-square&logo=databricks)
 
 ## Overview
-A Model Context Protocol server that exposes data in Unity Catalog (functions, vector search indexes), as well as Unity Catalog-powered 
-Genie spaces, as tools.
+A Model Context Protocol server that exposes structured and unstructured data in Unity Catalog ([vector search indexes](https://docs.databricks.com/gcp/en/generative-ai/vector-search), [functions](https://docs.databricks.com/aws/en/generative-ai/agent-framework/create-custom-tool), and 
+[Genie spaces](https://docs.databricks.com/aws/en/genie/)), as tools.
+
+<img src="docs/images/demo.png" alt="Demo image" height="400px">
 
 ## Usage
-1. Install uv from Astral
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 1. Install Python using `uv python install 3.12`
 1. [Configure Databricks credentials](https://docs.databricks.com/aws/en/dev-tools/cli/authentication) with access to the required APIs
 1. Add the server to your MCP client configuration. For example, to use this server with Claude Desktop, add the following to your `claude_desktop_config.json`:
@@ -18,13 +17,16 @@ Genie spaces, as tools.
 {
   "mcpServers": {
     "databricks_unity_catalog": {
-      "command": "uv",
+      "command": "/path/to/uv/executable/uv",
       "args": [
         "--directory",
         "/path/to/this/repo/servers/unity_catalog",
+        "run",
+        "unitycatalog-mcp",
         "-s",
-        // Replace with the name of your Unity Catalog schema
-        "prod.genai" 
+        "your_catalog.your_schema",
+        "-g",
+        "genie_space_id_1,genie_space_id_2"
       ]
     }
   }
@@ -33,7 +35,7 @@ Genie spaces, as tools.
 
 ## Supported tools
 
-The list of tools supported by this server is dynamically inferred based on the functions and vector search indexes
+The list of tools supported by this server is dynamically inferred at startup time based on the functions and vector search indexes
 within the specified Unity Catalog schema, as well as any specified Genie spaces. In particular, the server exposes
 the following tools:
 
