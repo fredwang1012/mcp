@@ -5,9 +5,9 @@ from mcp.types import (
     EmbeddedResource,
 )
 
-from unitycatalog_mcp.tools.genie import list_genie_tools
-from unitycatalog_mcp.tools.functions import list_uc_function_tools
-from unitycatalog_mcp.tools.vector_search import list_vector_search_tools
+from .genie import list_genie_tools
+from .functions import list_uc_function_tools
+from .vector_search import list_vector_search_tools
 
 Content: TypeAlias = Union[TextContent, ImageContent, EmbeddedResource]
 

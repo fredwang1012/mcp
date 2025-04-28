@@ -1,0 +1,18 @@
+#command: [
+#  "uv",
+#  "run",
+#  "unitycatalog-mcp",
+#  "-s",
+#  "retail_prod.agents",
+#  "-g",
+#  "01efcca6fdc712d7be87a40ad4a2e33e"
+#]
+
+command: [
+  "uvicorn",
+  "src.unitycatalog_mcp.__main__:main"
+]
+
+#env:
+#  - name: "SERVING_ENDPOINT"
+#    valueFrom: "serving-endpoint"
