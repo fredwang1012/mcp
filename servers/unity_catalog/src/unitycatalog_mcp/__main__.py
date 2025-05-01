@@ -6,7 +6,8 @@ then launches Uvicorn programmatically so that custom flags
 aren't swallowed by Uvicorn's CLI.
 """
 import uvicorn
-from .cli import get_settings
+from unitycatalog_mcp.server import app
+
 # import src.unitycatalog_mcp.cli as cli_mod
 
 
@@ -19,8 +20,8 @@ def main():
 
     # Launch Uvicorn programmatically (no CLI flag conflicts)
     uvicorn.run(
-        "src.unitycatalog_mcp.server:app",
-        host="0.0.0.0",
+        app,
+        host="localhost",
         port=8000,
         reload=True,
     )
