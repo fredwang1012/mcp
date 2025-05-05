@@ -20,5 +20,5 @@ def list_all_tools(settings):
     return (
         list_genie_tools(settings)
         + list_vector_search_tools(settings)
-        # + list_uc_function_tools(settings)
+        + list_uc_function_tools(settings)
     )
