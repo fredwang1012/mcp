@@ -16,6 +16,7 @@ class AppsBuildHook(BuildHookInterface):
     - The resulting build directory is printed to the console.
 
     """
+
     def finalize(
         self, version: str, build_data: dict[str, Any], artifact_path: str
     ) -> None:
