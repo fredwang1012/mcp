@@ -5,6 +5,17 @@ import shutil
 
 
 class AppsBuildHook(BuildHookInterface):
+    """Hook to create a Databricks Apps-compatible build.
+
+    This hook is used to create a Databricks Apps-compatible build of the project.
+
+    The following steps are performed:
+    - Remove the ./.build folder if it exists.
+    - Copy the artifact_path to the ./.build folder.
+    - Write the name of the artifact to a requirements.txt file in the ./.build folder.
+    - The resulting build directory is printed to the console.
+
+    """
     def finalize(
         self, version: str, build_data: dict[str, Any], artifact_path: str
     ) -> None:
