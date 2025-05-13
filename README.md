@@ -13,7 +13,7 @@ Table of Contents
     - [Usage](#usage)
     - [Supported tools](#supported-tools)
   - [Developer Tools Server](#developer-tools-server)
-  - [Deploying the MCP server on Databricks Apps](#deploying-the-mcp-server-on-databricks-apps)
+  - [Deploying MCP servers on Databricks Apps](#deploying-mcp-servers-on-databricks-apps)
   - [Support](#support)
   - [Contributing](#contributing)
 
@@ -79,21 +79,24 @@ This server is currently under construction. It is not yet usable, but contribut
 
 ## Deploying MCP servers on Databricks Apps
 
-The MCP servers in this repo can be deployed on Databricks Apps. To do so, follow the instructions below:
+You can deploy the Unity Catalog MCP server as a Databricks app. To do so, follow the instructions below:
+
 1. Move into the project directory:
 ```bash
 cd /path/to/this/repo
 ```
 
-2. Deploy the app:
+2. Push app code to Databricks:
 ```bash
 databricks bundle deploy -p <name-of-your-profile>
 ```
 
-3. Run the app:
+3. Deploy the app:
 ```bash
 databricks bundle run mcp-on-apps -p <name-of-your-profile>
 ```
+
+If you are a developer iterating on the server implementation, you can repeat steps #2 and #3 to push your latest modifications to the server to your Databricks app.
 
 ## Support
 Please note that all projects in the `databrickslabs` GitHub organization are provided for your exploration only, and are not formally supported by Databricks with Service Level Agreements (SLAs).  They are provided AS-IS and we do not make any guarantees of any kind.  Please do not submit a support ticket relating to any issues arising from the use of these projects.
