@@ -77,9 +77,9 @@ the following tools:
 
 This server is currently under construction. It is not yet usable, but contributions are welcome!
 
-## Deploying the MCP server on Databricks Apps
+## Deploying MCP servers on Databricks Apps
 
-This server can be deployed on Databricks Apps. To do so, follow the instructions below:
+The MCP servers in this repo can be deployed on Databricks Apps. To do so, follow the instructions below:
 1. Move into the project directory:
 ```bash
 cd /path/to/this/repo
