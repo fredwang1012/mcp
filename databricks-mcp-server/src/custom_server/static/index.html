@@ -93,12 +93,13 @@
                             </dd>
                         </div>
                         <div class="bg-gray-900 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6">
-                            <dt class="text-sm font-medium text-gray-400">Step 6: OAuth2 Authentication</dt>
+                            <dt class="text-sm font-medium text-gray-400">Step 6: User Authentication</dt>
                             <dd class="mt-1 text-sm text-gray-100 sm:mt-0 sm:col-span-2">
-                                <span class="text-yellow-400">🔧 IN PROGRESS</span> - User-specific OAuth2 flow with Entra ID
+                                <span class="text-green-400">✅ COMPLETED</span> - User-specific authentication with Entra ID
                                 <div class="mt-2 text-xs text-gray-400">
-                                    ✅ Auth endpoints: /auth/login, /auth/callback, /auth/status<br>
-                                    ⏳ MCP tools still use service principal
+                                    ✅ Bearer token authentication for API access<br>
+                                    ✅ Databricks browser session integration<br>
+                                    ✅ MCP tools use authenticated user's permissions
                                 </div>
                             </dd>
                         </div>
@@ -120,11 +121,11 @@
                     <dl class="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
                         <div class="sm:col-span-1">
                             <dt class="text-sm font-medium text-gray-400">
-                                Server URL
+                                MCP Endpoint
                             </dt>
                             <dd class="mt-1 text-sm text-gray-100">
                                 <code
-                                    class="bg-gray-900 px-2 py-1 rounded">https://your.app.url.databricksapps.com</code>
+                                    class="bg-gray-900 px-2 py-1 rounded">https://your.app.url.databricksapps.com/mcp</code>
                             </dd>
                         </div>
                         <div class="sm:col-span-1">
@@ -139,35 +140,27 @@
                         </div>
                         <div class="sm:col-span-2">
                             <dt class="text-sm font-medium text-gray-400">
-                                Example Connection (Python)
+                                Example Claude Desktop Configuration
                             </dt>
                             <dd class="mt-1 text-sm text-gray-100">
                                 <pre class="bg-gray-900 p-3 rounded overflow-x-auto">
-<code class="language-python">
-from databricks.sdk import WorkspaceClient
-from databricks_mcp import DatabricksOAuthClientProvider
-from mcp.client.streamable_http import streamablehttp_client as connect
-from mcp import ClientSession
-
-client = WorkspaceClient()
-
-async def main():
-    # Connect to a streamable HTTP server
-
-    app_url = "https://your.app.url.databricksapps.com/mcp/"
-    async with connect(app_url, auth=DatabricksOAuthClientProvider(client)) as (
-        read_stream,
-        write_stream,
-        _,
-    ):
-        # Create a session using the client streams
-        async with ClientSession(read_stream, write_stream) as session:
-            # Initialize the connection
-            await session.initialize()
-            # Call a tool
-            tool_result = await session.call_tool("echo", {"message": "hello"})
+<code class="language-json">
+{
+  "mcpServers": {
+    "databricks-unity-catalog": {
+      "url": "https://your.app.url.databricksapps.com/mcp",
+      "transport": "sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_DATABRICKS_TOKEN"
+      }
+    }
+  }
+}
 </code>
                                 </pre>
+                                <p class="mt-2 text-xs text-gray-400">
+                                    Get your token from the Databricks workspace settings or use the CLI: <code class="bg-gray-900 px-1 py-0.5 rounded">databricks auth token</code>
+                                </p>
                             </dd>
                         </div>
                         <div class="sm:col-span-2">
