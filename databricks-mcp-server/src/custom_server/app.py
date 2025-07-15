@@ -1,853 +1,424 @@
-from pathlib import Path
-from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from databricks.sdk import WorkspaceClient
-import os
+import time
+print("🚀 Unity Catalog MCP Server - VERSION 7.0 OFFICIAL MCP SDK")
+print("✅ Using official MCP SDK - abandoning FastMCP!")
+print(f"🕒 Server starting at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+print("📍 File path: src/custom_server/app.py")
+
+import asyncio
 import json
-from typing import Dict, Any
+import os
+from typing import Any, Dict, List
+from pathlib import Path
 
-STATIC_DIR = Path(__file__).parent / "static"
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+from databricks.sdk import WorkspaceClient
 
-# Create an MCP server with user authentication context
-mcp = FastMCP(
-    name="Unity Catalog SQL MCP Server",
-    stateless_http = True,  # Use stateless HTTP mode for simplicity
-    )
+# Official MCP SDK imports
+from mcp.server import Server
+from mcp.types import Tool, TextContent, CallToolRequest, CallToolResult
+import mcp.server.stdio
 
-# Databricks configuration
-DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST", "https://adb-1761712055023179.19.azuredatabricks.net")
-WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID", "a85c850e7621e163")
+# =============================================
+# DATABRICKS CONFIGURATION
+# =============================================
 
-# Global variable to store current request context for MCP tools
-_current_request: Request | None = None
+DATABRICKS_HOST = os.environ.get('DATABRICKS_HOST', 'https://adb-1761712055023179.19.azuredatabricks.net')
+DATABRICKS_WAREHOUSE_ID = os.environ.get('DATABRICKS_WAREHOUSE_ID', 'a85c850e7621e163')
 
-def get_current_user_token() -> str | None:
-    """Get the current user's OAuth token from request context"""
-    if _current_request:
-        # Try Authorization header first (for Bearer token auth)
-        auth_header = _current_request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            return auth_header.replace("Bearer ", "").strip()
-        
-        # Fallback to x-forwarded-access-token (for browser sessions)
-        return _current_request.headers.get("x-forwarded-access-token")
-    
-    # If no context, try environment variables as fallback
-    return os.environ.get("DATABRICKS_ACCESS_TOKEN")
+print(f"🔧 Databricks Host: {DATABRICKS_HOST}")
+print(f"🔧 Warehouse ID: {DATABRICKS_WAREHOUSE_ID}")
 
+# =============================================
+# DATABRICKS CLIENT
+# =============================================
 
-def get_current_user_email() -> str:
-    """Get the current user's email from request context"""
-    if _current_request:
-        return _current_request.headers.get("x-forwarded-email", "unknown")
-    return "unknown"
-
-
-def get_databricks_client(user_token: str | None = None):
-    """Get Databricks workspace client using user's access token or app authentication"""
+def get_databricks_client():
+    """Get authenticated Databricks client"""
     try:
-        if user_token:
-            # Temporarily remove OAuth env vars to avoid conflict with user token
-            old_client_id = os.environ.pop('DATABRICKS_CLIENT_ID', None)
-            old_client_secret = os.environ.pop('DATABRICKS_CLIENT_SECRET', None)
-            
-            try:
-                client = WorkspaceClient(
-                    host=DATABRICKS_HOST,
-                    token=user_token
-                )
-                print(f"Using user's access token for authentication")
-            finally:
-                # Restore OAuth env vars for other uses
-                if old_client_id:
-                    os.environ['DATABRICKS_CLIENT_ID'] = old_client_id
-                if old_client_secret:
-                    os.environ['DATABRICKS_CLIENT_SECRET'] = old_client_secret
-        else:
-            # Fallback to service principal authentication
-            client = WorkspaceClient()
-            print(f"Using service principal authentication")
+        client = WorkspaceClient()
         return client
     except Exception as e:
-        print(f"Error creating Databricks client: {e}")
+        print(f"❌ Error initializing Databricks client: {e}")
         return None
 
+# =============================================
+# MCP SERVER SETUP
+# =============================================
 
-# Tool definitions - use decorators for proper registration
-@mcp.tool()
-def query_sql(query: str, limit: int = 100) -> str:
-    """Execute a SQL query against Unity Catalog using user's permissions
-    
-    Args:
-        query: SQL query to execute
-        limit: Maximum number of rows to return (default: 100)
-    
-    Returns:
-        Query results formatted as JSON string
-    """
-    user_token = get_current_user_token()
-    user_email = get_current_user_email()
-    
-    try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return json.dumps({
-                "error": "Failed to create Databricks client",
-                "user": user_email
-            })
-        
-        # Execute the statement
-        response = client.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
+# Create official MCP server
+server = Server("unity-catalog-mcp")
+print("✅ Official MCP server created!")
+
+# =============================================
+# MCP TOOLS
+# =============================================
+
+@server.list_tools()
+async def list_tools() -> List[Tool]:
+    """List available tools"""
+    return [
+        Tool(
+            name="query_sql",
+            description="Execute SQL query against Unity Catalog",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "SQL query to execute"}
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
+            name="list_catalogs",
+            description="List all available catalogs in Unity Catalog",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
+        Tool(
+            name="list_schemas",
+            description="List schemas in a specific catalog",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "catalog_name": {"type": "string", "description": "Name of the catalog"}
+                },
+                "required": ["catalog_name"]
+            }
+        ),
+        Tool(
+            name="list_tables",
+            description="List tables in a specific schema",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "catalog_name": {"type": "string", "description": "Name of the catalog"},
+                    "schema_name": {"type": "string", "description": "Name of the schema"}
+                },
+                "required": ["catalog_name", "schema_name"]
+            }
+        ),
+        Tool(
+            name="describe_table",
+            description="Get detailed information about a specific table",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "catalog_name": {"type": "string", "description": "Name of the catalog"},
+                    "schema_name": {"type": "string", "description": "Name of the schema"},
+                    "table_name": {"type": "string", "description": "Name of the table"}
+                },
+                "required": ["catalog_name", "schema_name", "table_name"]
+            }
+        ),
+        Tool(
+            name="search_tables",
+            description="Search for tables matching a query in a catalog",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "catalog_name": {"type": "string", "description": "Name of the catalog"},
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["catalog_name", "query"]
+            }
         )
-        
-        # Get the result
-        if hasattr(response, 'statement_id') and response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=response.statement_id)
-            
-            if hasattr(result, 'result') and result.result:
-                if hasattr(result.result, 'data_array'):
-                    rows = result.result.data_array[:limit] if result.result.data_array else []
-                    columns = []
-                    if hasattr(result.result, 'schema') and result.result.schema:
-                        columns = [col.name for col in result.result.schema.columns] if result.result.schema.columns else []
-                    
-                    return json.dumps({
-                        "success": True,
-                        "user": user_email,
-                        "query": query,
-                        "columns": columns,
-                        "rows": rows,
-                        "row_count": len(rows),
-                        "limited": len(rows) == limit
-                    }, indent=2)
-                    
-        return json.dumps({
-            "success": True,
-            "user": user_email,
-            "query": query,
-            "rows": [],
-            "message": "Query executed but returned no results"
-        })
-            
-    except Exception as e:
-        return json.dumps({
-            "error": f"SQL query failed: {str(e)}",
-            "user": user_email,
-            "query": query
-        })
+    ]
 
-
-@mcp.tool()
-def list_catalogs() -> str:
-    """List all Unity Catalog catalogs accessible to the current user
-    
-    Returns:
-        List of catalogs in JSON format
-    """
-    user_token = get_current_user_token()
-    user_email = get_current_user_email()
-    
+@server.call_tool()
+async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
+    """Handle tool calls"""
     try:
-        client = get_databricks_client(user_token=user_token)
+        client = get_databricks_client()
         if not client:
-            return json.dumps({"error": "Failed to create Databricks client"})
+            return CallToolResult(
+                content=[TextContent(type="text", text="❌ Error: Unable to connect to Databricks")]
+            )
         
-        # Get catalogs using SQL query (more reliable with user permissions)
-        response = client.statement_execution.execute_statement(
-            statement="SHOW CATALOGS",
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
-        )
+        if name == "query_sql":
+            query = arguments.get("query", "")
+            with client.sql.statement_execution.create(query=query, warehouse_id=DATABRICKS_WAREHOUSE_ID) as cursor:
+                result = cursor.fetchall()
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Query executed successfully. Results: {json.dumps(result, indent=2)}")]
+            )
         
-        catalogs = []
-        if hasattr(response, 'statement_id') and response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=response.statement_id)
+        elif name == "list_catalogs":
+            catalogs = list(client.catalogs.list())
+            catalog_names = [catalog.name for catalog in catalogs]
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Available catalogs: {json.dumps(catalog_names, indent=2)}")]
+            )
+        
+        elif name == "list_schemas":
+            catalog_name = arguments.get("catalog_name", "")
+            schemas = list(client.schemas.list(catalog_name=catalog_name))
+            schema_names = [schema.name for schema in schemas]
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Schemas in catalog '{catalog_name}': {json.dumps(schema_names, indent=2)}")]
+            )
+        
+        elif name == "list_tables":
+            catalog_name = arguments.get("catalog_name", "")
+            schema_name = arguments.get("schema_name", "")
+            tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema_name))
+            table_names = [table.name for table in tables]
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Tables in schema '{catalog_name}.{schema_name}': {json.dumps(table_names, indent=2)}")]
+            )
+        
+        elif name == "describe_table":
+            catalog_name = arguments.get("catalog_name", "")
+            schema_name = arguments.get("schema_name", "")
+            table_name = arguments.get("table_name", "")
+            table = client.tables.get(full_name=f"{catalog_name}.{schema_name}.{table_name}")
             
-            if hasattr(result, 'result') and result.result and hasattr(result.result, 'data_array'):
-                for catalog_row in result.result.data_array:
-                    catalog_name = catalog_row[0] if catalog_row else None
-                    if catalog_name:
-                        catalogs.append(catalog_name)
-        
-        return json.dumps({
-            "success": True,
-            "user": user_email,
-            "catalogs": catalogs,
-            "count": len(catalogs)
-        }, indent=2)
-        
-    except Exception as e:
-        return json.dumps({
-            "error": f"Failed to list catalogs: {str(e)}",
-            "user": user_email
-        })
-
-
-@mcp.tool()
-def list_schemas(catalog: str) -> str:
-    """List schemas in a specific catalog
-    
-    Args:
-        catalog: Name of the catalog
-        
-    Returns:
-        List of schemas in JSON format
-    """
-    user_token = get_current_user_token()
-    user_email = get_current_user_email()
-    
-    try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return json.dumps({"error": "Failed to create Databricks client"})
-        
-        response = client.statement_execution.execute_statement(
-            statement=f"SHOW SCHEMAS IN {catalog}",
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
-        )
-        
-        schemas = []
-        if hasattr(response, 'statement_id') and response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=response.statement_id)
+            table_info = {
+                "name": table.name,
+                "catalog": table.catalog_name,
+                "schema": table.schema_name,
+                "table_type": table.table_type,
+                "data_source_format": table.data_source_format,
+                "columns": [{"name": col.name, "type": col.type_name} for col in table.columns] if table.columns else [],
+                "comment": table.comment
+            }
             
-            if hasattr(result, 'result') and result.result and hasattr(result.result, 'data_array'):
-                for schema_row in result.result.data_array:
-                    schema_name = schema_row[0] if schema_row else None
-                    if schema_name:
-                        schemas.append(schema_name)
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Table details: {json.dumps(table_info, indent=2)}")]
+            )
         
-        return json.dumps({
-            "success": True,
-            "user": user_email,
-            "catalog": catalog,
-            "schemas": schemas,
-            "count": len(schemas)
-        }, indent=2)
-        
-    except Exception as e:
-        return json.dumps({
-            "error": f"Failed to list schemas in catalog '{catalog}': {str(e)}",
-            "user": user_email,
-            "catalog": catalog
-        })
-
-
-@mcp.tool()
-def list_tables(catalog: str, schema: str) -> str:
-    """List tables in a specific schema
-    
-    Args:
-        catalog: Name of the catalog
-        schema: Name of the schema
-        
-    Returns:
-        List of tables in JSON format
-    """
-    user_token = get_current_user_token()
-    user_email = get_current_user_email()
-    
-    try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return json.dumps({"error": "Failed to create Databricks client"})
-        
-        response = client.statement_execution.execute_statement(
-            statement=f"SHOW TABLES IN {catalog}.{schema}",
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
-        )
-        
-        tables = []
-        if hasattr(response, 'statement_id') and response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=response.statement_id)
+        elif name == "search_tables":
+            catalog_name = arguments.get("catalog_name", "")
+            query = arguments.get("query", "")
             
-            if hasattr(result, 'result') and result.result and hasattr(result.result, 'data_array'):
-                for table_row in result.result.data_array:
-                    if table_row and len(table_row) >= 2:
-                        table_name = table_row[1]  # Second column is table name
-                        table_type = table_row[3] if len(table_row) > 3 else "TABLE"  # Fourth column is table type
-                        if table_name:
-                            tables.append({
-                                "name": table_name,
-                                "type": table_type
+            schemas = list(client.schemas.list(catalog_name=catalog_name))
+            matching_tables = []
+            
+            for schema in schemas:
+                try:
+                    tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema.name))
+                    for table in tables:
+                        if query.lower() in table.name.lower():
+                            matching_tables.append({
+                                "full_name": f"{catalog_name}.{schema.name}.{table.name}",
+                                "name": table.name,
+                                "schema": schema.name,
+                                "table_type": table.table_type
                             })
-        
-        return json.dumps({
-            "success": True,
-            "user": user_email,
-            "catalog": catalog,
-            "schema": schema,
-            "tables": tables,
-            "count": len(tables)
-        }, indent=2)
-        
-    except Exception as e:
-        return json.dumps({
-            "error": f"Failed to list tables in {catalog}.{schema}: {str(e)}",
-            "user": user_email,
-            "catalog": catalog,
-            "schema": schema
-        })
-
-
-@mcp.tool()
-def describe_table(catalog: str, schema: str, table: str) -> str:
-    """Get detailed information about a table including schema and metadata
-    
-    Args:
-        catalog: Name of the catalog
-        schema: Name of the schema
-        table: Name of the table
-        
-    Returns:
-        Table description in JSON format
-    """
-    user_token = get_current_user_token()
-    user_email = get_current_user_email()
-    
-    try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return json.dumps({"error": "Failed to create Databricks client"})
-        
-        full_table_name = f"{catalog}.{schema}.{table}"
-        
-        response = client.statement_execution.execute_statement(
-            statement=f"DESCRIBE TABLE EXTENDED {full_table_name}",
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
-        )
-        
-        columns = []
-        
-        if hasattr(response, 'statement_id') and response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=response.statement_id)
+                except Exception:
+                    continue
             
-            if hasattr(result, 'result') and result.result and hasattr(result.result, 'data_array'):
-                for row in result.result.data_array:
-                    if row and len(row) >= 3:
-                        col_name = row[0]
-                        data_type = row[1]
-                        comment = row[2]
-                        
-                        if col_name and not col_name.startswith("#"):  # Skip metadata rows
-                            if col_name == "":  # Properties section starts
-                                break
-                            columns.append({
-                                "name": col_name,
-                                "type": data_type,
-                                "comment": comment
-                            })
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"✅ Found {len(matching_tables)} tables matching '{query}': {json.dumps(matching_tables, indent=2)}")]
+            )
         
-        return json.dumps({
-            "success": True,
-            "user": user_email,
-            "table": full_table_name,
-            "columns": columns,
-            "column_count": len(columns)
-        }, indent=2)
-        
+        else:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"❌ Unknown tool: {name}")]
+            )
+    
     except Exception as e:
-        return json.dumps({
-            "error": f"Failed to describe table {catalog}.{schema}.{table}: {str(e)}",
-            "user": user_email,
-            "table": f"{catalog}.{schema}.{table}"
-        })
-
-
-@mcp.tool()
-def search_tables(search_term: str, limit: int = 20) -> str:
-    """Search for tables across all accessible catalogs by name pattern
-    
-    Args:
-        search_term: Search pattern (will be used in LIKE '%term%')
-        limit: Maximum number of results to return
-        
-    Returns:
-        Search results in JSON format
-    """
-    user_token = get_current_user_token()
-    user_email = get_current_user_email()
-    
-    try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return json.dumps({"error": "Failed to create Databricks client"})
-        
-        # Get list of catalogs first
-        catalogs_response = client.statement_execution.execute_statement(
-            statement="SHOW CATALOGS",
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"❌ Error executing tool {name}: {str(e)}")]
         )
-        
-        catalogs = []
-        if hasattr(catalogs_response, 'statement_id') and catalogs_response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=catalogs_response.statement_id)
-            if hasattr(result, 'result') and result.result and hasattr(result.result, 'data_array'):
-                for catalog_row in result.result.data_array:
-                    if catalog_row and catalog_row[0]:
-                        catalogs.append(catalog_row[0])
-        
-        # Search in each catalog
-        matching_tables = []
-        
-        for catalog in catalogs[:10]:  # Limit catalog search
-            try:
-                schemas_response = client.statement_execution.execute_statement(
-                    statement=f"SHOW SCHEMAS IN {catalog}",
-                    warehouse_id=WAREHOUSE_ID,
-                    wait_timeout="30s"
-                )
-                
-                schemas = []
-                if hasattr(schemas_response, 'statement_id') and schemas_response.statement_id:
-                    schemas_result = client.statement_execution.get_statement(statement_id=schemas_response.statement_id)
-                    if hasattr(schemas_result, 'result') and schemas_result.result and hasattr(schemas_result.result, 'data_array'):
-                        for schema_row in schemas_result.result.data_array:
-                            if schema_row and schema_row[0]:
-                                schemas.append(schema_row[0])
-                
-                for schema in schemas[:5]:  # Limit schema search
-                    try:
-                        tables_response = client.statement_execution.execute_statement(
-                            statement=f"SHOW TABLES IN {catalog}.{schema}",
-                            warehouse_id=WAREHOUSE_ID,
-                            wait_timeout="30s"
-                        )
-                        
-                        if hasattr(tables_response, 'statement_id') and tables_response.statement_id:
-                            tables_result = client.statement_execution.get_statement(statement_id=tables_response.statement_id)
-                            if hasattr(tables_result, 'result') and tables_result.result and hasattr(tables_result.result, 'data_array'):
-                                for table_row in tables_result.result.data_array:
-                                    if table_row and len(table_row) >= 2:
-                                        table_name = table_row[1]
-                                        if table_name and search_term.lower() in table_name.lower():
-                                            matching_tables.append({
-                                                "catalog": catalog,
-                                                "schema": schema,
-                                                "table": table_name,
-                                                "full_name": f"{catalog}.{schema}.{table_name}"
-                                            })
-                                            if len(matching_tables) >= limit:
-                                                break
-                    except:
-                        pass
-                        continue
-                    
-                    if len(matching_tables) >= limit:
-                        break
-            except:
-                pass
-                continue
-                
-            if len(matching_tables) >= limit:
-                break
-        
-        return json.dumps({
-            "success": True,
-            "user": user_email,
-            "search_term": search_term,
-            "results": matching_tables,
-            "count": len(matching_tables),
-            "limited": len(matching_tables) == limit
-        }, indent=2)
-        
-    except Exception as e:
-        return json.dumps({
-            "error": f"Failed to search tables: {str(e)}",
-            "user": user_email,
-            "search_term": search_term
-        })
 
+print("✅ MCP tools registered successfully!")
 
-# Enhanced Unity Catalog resource
-@mcp.resource("unity-catalog://overview")
-def get_unity_catalog_overview() -> str:
-    """Get comprehensive overview of accessible Unity Catalog resources"""
-    user_token = get_current_user_token()
-    user_email = get_current_user_email()
-    
-    try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return "Error: Failed to create Databricks client"
-        
-        # Get catalogs using SQL query
-        response = client.statement_execution.execute_statement(
-            statement="SHOW CATALOGS",
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
-        )
-        
-        overview = f"Unity Catalog Overview for {user_email}\n"
-        overview += "=" * 50 + "\n\n"
-        
-        catalog_count = 0
-        if hasattr(response, 'statement_id') and response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=response.statement_id)
-            
-            if hasattr(result, 'result') and result.result and hasattr(result.result, 'data_array'):
-                catalog_count = len(result.result.data_array)
-                overview += f"📊 Total Accessible Catalogs: {catalog_count}\n\n"
-                
-                for i, catalog_row in enumerate(result.result.data_array[:10]):  # Show first 10
-                    catalog_name = catalog_row[0] if catalog_row else None
-                    if catalog_name:
-                        overview += f"📁 {i+1}. {catalog_name}\n"
-                        
-                        # Try to get a few schemas
-                        try:
-                            schemas_response = client.statement_execution.execute_statement(
-                                statement=f"SHOW SCHEMAS IN {catalog_name}",
-                                warehouse_id=WAREHOUSE_ID,
-                                wait_timeout="15s"
-                            )
-                            
-                            if hasattr(schemas_response, 'statement_id') and schemas_response.statement_id:
-                                schemas_result = client.statement_execution.get_statement(statement_id=schemas_response.statement_id)
-                                if hasattr(schemas_result, 'result') and schemas_result.result and hasattr(schemas_result.result, 'data_array'):
-                                    schema_count = len(schemas_result.result.data_array)
-                                    overview += f"   📂 Schemas: {schema_count}\n"
-                                    
-                                    for schema_row in schemas_result.result.data_array[:3]:  # Show first 3 schemas
-                                        schema_name = schema_row[0] if schema_row else None
-                                        if schema_name:
-                                            overview += f"      • {schema_name}\n"
-                                            
-                        except Exception as e:
-                            overview += f"   ❌ Error accessing schemas: {str(e)[:50]}...\n"
-                        
-                        overview += "\n"
-                
-                if catalog_count > 10:
-                    overview += f"... and {catalog_count - 10} more catalogs\n\n"
-        
-        overview += f"🔍 Use the MCP tools to explore your data:\n"
-        overview += f"   • query_sql() - Execute SQL queries\n"
-        overview += f"   • list_catalogs() - List all catalogs\n"
-        overview += f"   • list_schemas(catalog) - List schemas\n"
-        overview += f"   • list_tables(catalog, schema) - List tables\n"
-        overview += f"   • describe_table(catalog, schema, table) - Table details\n"
-        overview += f"   • search_tables(term) - Search for tables\n"
-        
-        return overview
-        
-    except Exception as e:
-        return f"Error accessing Unity Catalog: {str(e)}"
+# =============================================
+# FASTAPI SETUP
+# =============================================
 
-
-# Create the streamable HTTP app AFTER all tools and resources are defined
-mcp_app = mcp.streamable_http_app()
-
-# Create FastAPI app
 app = FastAPI(
-    lifespan=mcp_app.router.lifespan_context
+    title="Unity Catalog MCP Server",
+    description="MCP server for Unity Catalog integration using official SDK",
+    version="7.0",
+    redirect_slashes=False
 )
 
-# Create a router for non-MCP endpoints
-from fastapi import APIRouter
-router = APIRouter()
+# Add proxy headers middleware
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
-# Middleware to set request context for ALL requests
-@app.middleware("http")
-async def request_context_middleware(request: Request, call_next):
-    """Set the current request context for MCP tools"""
-    global _current_request
-    _current_request = request
-    try:
-        response = await call_next(request)
-        return response
-    finally:
-        _current_request = None
+print("✅ FastAPI app created!")
 
+# =============================================
+# REGULAR ENDPOINTS
+# =============================================
 
-# Move all endpoints to router
-@router.get("/ui", include_in_schema=False)
-async def serve_index():
-    return FileResponse(STATIC_DIR / "index.html")
-
-@router.get("/ui/")
-async def redirect_ui():
-    return RedirectResponse(url="/ui", status_code=301)
-
-@router.get("/health")
-async def health_check():
-    """Simple health check endpoint"""
-    return JSONResponse({"status": "healthy", "service": "Unity Catalog MCP Server"})
-
-@router.get("/debug-headers")
-async def debug_headers(request: Request):
-    """Show all headers received by the app"""
-    headers_dict = dict(request.headers)
-    
-    # Highlight important headers
-    important_headers = {
-        "x-forwarded-access-token": headers_dict.get("x-forwarded-access-token", "NOT PRESENT"),
-        "x-forwarded-email": headers_dict.get("x-forwarded-email", "NOT PRESENT"),
-        "x-forwarded-user": headers_dict.get("x-forwarded-user", "NOT PRESENT"),
-        "authorization": headers_dict.get("authorization", "NOT PRESENT"),
-        "cookie": "PRESENT" if headers_dict.get("cookie") else "NOT PRESENT"
+@app.get("/")
+async def home():
+    """Home page"""
+    return {
+        "message": "Unity Catalog MCP Server", 
+        "version": "7.0", 
+        "status": "running",
+        "approach": "official_mcp_sdk"
     }
-    
-    return JSONResponse({
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy", 
+        "service": "Unity Catalog MCP Server",
+        "mcp_sdk": "official",
+        "endpoint": "/mcp"
+    }
+
+@app.get("/debug-headers")
+async def debug_headers(request: Request):
+    """Debug endpoint to check headers"""
+    headers = dict(request.headers)
+    return {
         "message": "Headers received by Databricks App",
-        "important_headers": important_headers,
-        "all_headers": headers_dict,
-        "notes": {
-            "x-forwarded-access-token": "This is the user's downscoped access token (only available in browser sessions)",
-            "x-forwarded-email": "The logged-in user's email",
-            "info": "These headers are only present when accessing through a browser after Databricks login"
+        "all_headers": headers,
+        "important_headers": {
+            "host": headers.get("host", "not found"),
+            "x-forwarded-for": headers.get("x-forwarded-for", "not found"),
+            "x-forwarded-proto": headers.get("x-forwarded-proto", "not found"),
+            "x-forwarded-access-token": headers.get("x-forwarded-access-token", "not found"),
+            "user-agent": headers.get("user-agent", "not found")
         }
-    })
+    }
 
+@app.get("/debug-mcp")
+async def debug_mcp():
+    """Debug MCP server info"""
+    return {
+        "message": "MCP server info",
+        "server_name": "unity-catalog-mcp",
+        "approach": "official_mcp_sdk",
+        "tools_count": 6,
+        "endpoint": "/mcp",
+        "ready": True
+    }
 
-# Test SQL query endpoint using user's access token
-@router.get("/test-sql")
-async def test_sql_query(request: Request, query: str = "SHOW CATALOGS"):
-    """Test SQL query using user's access token"""
-    user_token = request.headers.get("x-forwarded-access-token")
-    user_email = request.headers.get("x-forwarded-email", "unknown")
-    
-    if not user_token:
-        return JSONResponse({
-            "error": "No user access token found",
-            "message": "This endpoint requires browser authentication through Databricks"
-        }, status_code=401)
-    
+# =============================================
+# MCP ENDPOINT - DIRECT IMPLEMENTATION
+# =============================================
+
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    """MCP endpoint using official SDK"""
     try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return JSONResponse({"error": "Failed to create Databricks client"}, status_code=500)
+        # Get the request body
+        body = await request.body()
         
-        # Execute the SQL query
-        response = client.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
-        )
+        # Parse JSON-RPC request
+        try:
+            rpc_request = json.loads(body.decode('utf-8'))
+        except json.JSONDecodeError:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
+                status_code=400
+            )
         
-        # Get the result
-        if hasattr(response, 'statement_id') and response.statement_id:
-            result = client.statement_execution.get_statement(statement_id=response.statement_id)
-            
-            if hasattr(result, 'result') and result.result:
-                if hasattr(result.result, 'data_array'):
-                    rows = result.result.data_array[:10] if result.result.data_array else []
-                    return JSONResponse({
-                        "success": True,
-                        "user": user_email,
-                        "query": query,
-                        "results": rows,
-                        "message": f"Query executed successfully with user permissions for {user_email}"
-                    })
+        # Handle different MCP methods
+        method = rpc_request.get("method")
+        request_id = rpc_request.get("id")
+        params = rpc_request.get("params", {})
         
-        return JSONResponse({
-            "success": True,
-            "user": user_email,
-            "query": query,
-            "results": [],
-            "message": "Query executed but returned no results"
-        })
-        
-    except Exception as e:
-        return JSONResponse({
-            "error": f"SQL query failed: {str(e)}",
-            "user": user_email,
-            "query": query
-        }, status_code=500)
-
-
-# User-specific catalog access endpoint
-@router.get("/my-catalogs")
-async def my_catalogs(request: Request):
-    """List catalogs accessible to the current user using SQL queries"""
-    user_token = request.headers.get("x-forwarded-access-token")
-    user_email = request.headers.get("x-forwarded-email", "unknown")
-    
-    if not user_token:
-        return JSONResponse({
-            "error": "No user access token found",
-            "message": "This endpoint requires browser authentication through Databricks"
-        }, status_code=401)
-    
-    try:
-        client = get_databricks_client(user_token=user_token)
-        if not client:
-            return JSONResponse({"error": "Failed to create Databricks client"}, status_code=500)
-        
-        # Get catalogs using SQL query
-        catalogs_response = client.statement_execution.execute_statement(
-            statement="SHOW CATALOGS",
-            warehouse_id=WAREHOUSE_ID,
-            wait_timeout="30s"
-        )
-        
-        catalog_info = []
-        
-        # Process catalog results
-        if hasattr(catalogs_response, 'statement_id') and catalogs_response.statement_id:
-            catalogs_result = client.statement_execution.get_statement(statement_id=catalogs_response.statement_id)
-            
-            if hasattr(catalogs_result, 'result') and catalogs_result.result and hasattr(catalogs_result.result, 'data_array'):
-                for catalog_row in catalogs_result.result.data_array:
-                    catalog_name = catalog_row[0] if catalog_row else None
-                    if catalog_name:
-                        catalog_data = {
-                            "name": catalog_name,
-                            "comment": "No description available via SQL",
-                            "schemas": []
-                        }
-                        
-                        # Try to get schemas for this catalog
-                        try:
-                            schemas_response = client.statement_execution.execute_statement(
-                                statement=f"SHOW SCHEMAS IN {catalog_name}",
-                                warehouse_id=WAREHOUSE_ID,
-                                wait_timeout="30s"
-                            )
-                            
-                            if hasattr(schemas_response, 'statement_id') and schemas_response.statement_id:
-                                schemas_result = client.statement_execution.get_statement(statement_id=schemas_response.statement_id)
-                                
-                                if hasattr(schemas_result, 'result') and schemas_result.result and hasattr(schemas_result.result, 'data_array'):
-                                    for schema_row in schemas_result.result.data_array[:3]:  # Limit to first 3 schemas
-                                        schema_name = schema_row[0] if schema_row else None
-                                        if schema_name:
-                                            schema_data = {
-                                                "name": schema_name,
-                                                "comment": "No description available via SQL"
-                                            }
-                                            catalog_data["schemas"].append(schema_data)
-                                            
-                        except Exception as e:
-                            catalog_data["schemas_error"] = f"Error getting schemas: {str(e)}"
-                        
-                        catalog_info.append(catalog_data)
-        
-        return JSONResponse({
-            "success": True,
-            "user": user_email,
-            "message": f"Showing catalogs accessible to {user_email} (via SQL)",
-            "catalogs": catalog_info,
-            "total_catalogs": len(catalog_info),
-            "method": "SQL queries (compatible with sql scope)"
-        })
-        
-    except Exception as e:
-        return JSONResponse({
-            "error": f"Failed to list catalogs: {str(e)}",
-            "user": user_email
-        }, status_code=500)
-
-
-# Add debug endpoint to show available routes  
-@router.get("/debug-routes")
-async def debug_routes():
-    """Show all available routes"""
-    routes = []
-    for route in app.routes:
-        if hasattr(route, 'path'):
-            routes.append({
-                "path": route.path,
-                "methods": list(route.methods) if hasattr(route, 'methods') else [],
-                "name": route.name if hasattr(route, 'name') else "N/A"
-            })
-    return JSONResponse({
-        "message": "Available routes",
-        "routes": routes,
-        "mcp_note": "MCP should be available at the mounted path"
-    })
-
-
-# Debug endpoint to check MCP tools
-@router.get("/debug-mcp-tools")
-async def debug_mcp_tools():
-    """Show registered MCP tools"""
-    try:
-        tools_info = []
-        
-        # Check the tool manager instead
-        if hasattr(mcp, '_tool_manager'):
-            # Try different ways to access tools
-            if hasattr(mcp._tool_manager, 'tools'):
-                for tool_name, tool_info in mcp._tool_manager.tools.items():
-                    tools_info.append({
-                        "name": tool_name,
-                        "info": str(tool_info)
-                    })
-            elif hasattr(mcp._tool_manager, '_tools'):
-                for tool_name, tool_info in mcp._tool_manager._tools.items():
-                    tools_info.append({
-                        "name": tool_name,
-                        "info": str(tool_info)
-                    })
-        
-        # Also check if there's a _mcp_server attribute
-        if hasattr(mcp, '_mcp_server'):
-            server_info = {
-                "has_mcp_server": True,
-                "server_type": str(type(mcp._mcp_server))
+        if method == "initialize":
+            # Initialize response
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {
+                        "name": "unity-catalog-mcp",
+                        "version": "7.0"
+                    },
+                    "capabilities": {
+                        "tools": {}
+                    }
+                },
+                "id": request_id
             }
-        else:
-            server_info = {"has_mcp_server": False}
+            return JSONResponse(response)
         
-        return JSONResponse({
-            "message": "MCP Tools Debug Info",
-            "tools_count": len(tools_info),
-            "tools": tools_info,
-            "server_info": server_info,
-            "tool_manager_attrs": dir(mcp._tool_manager) if hasattr(mcp, '_tool_manager') else [],
-            "mcp_attributes": dir(mcp),
-            "stateless_http": mcp.settings.stateless_http if hasattr(mcp, 'settings') else 'unknown'
-        })
+        elif method == "tools/list":
+            # List tools
+            tools = await list_tools()
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "tools": [
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "inputSchema": tool.inputSchema
+                        }
+                        for tool in tools
+                    ]
+                },
+                "id": request_id
+            }
+            return JSONResponse(response)
+        
+        elif method == "tools/call":
+            # Call tool
+            tool_name = params.get("name")
+            tool_args = params.get("arguments", {})
+            
+            result = await call_tool(tool_name, tool_args)
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [
+                        {
+                            "type": content.type,
+                            "text": content.text
+                        }
+                        for content in result.content
+                    ]
+                },
+                "id": request_id
+            }
+            return JSONResponse(response)
+        
+        else:
+            # Unknown method
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32601, "message": f"Method not found: {method}"},
+                    "id": request_id
+                },
+                status_code=400
+            )
+    
     except Exception as e:
-        return JSONResponse({
-            "error": f"Failed to debug MCP tools: {str(e)}",
-            "type": str(type(e))
-        })
+        print(f"❌ MCP endpoint error: {e}")
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
+                "id": rpc_request.get("id") if 'rpc_request' in locals() else None
+            },
+            status_code=500
+        )
 
+@app.get("/mcp")
+async def mcp_get():
+    """Handle GET requests to MCP endpoint"""
+    return JSONResponse(
+        {
+            "message": "MCP endpoint",
+            "method": "POST required",
+            "server": "unity-catalog-mcp",
+            "version": "7.0",
+            "approach": "official_mcp_sdk"
+        }
+    )
 
-# Debug endpoint to check MCP app routes
-@router.get("/debug-mcp-routes")
-async def debug_mcp_routes():
-    """Debug MCP app routes"""
-    routes = []
-    if hasattr(mcp_app, 'routes'):
-        for route in mcp_app.routes:
-            routes.append({
-                "path": getattr(route, 'path', 'N/A'),
-                "methods": list(getattr(route, 'methods', [])),
-                "name": getattr(route, 'name', 'N/A')
-            })
-    
-    # Also check router routes
-    router_routes = []
-    if hasattr(mcp_app, 'router') and hasattr(mcp_app.router, 'routes'):
-        for route in mcp_app.router.routes:
-            router_routes.append({
-                "path": getattr(route, 'path', 'N/A'),
-                "methods": list(getattr(route, 'methods', [])),
-                "name": getattr(route, 'name', 'N/A')
-            })
-    
-    return JSONResponse({
-        "mcp_app_type": str(type(mcp_app)),
-        "has_routes": hasattr(mcp_app, 'routes'),
-        "routes": routes,
-        "router_routes": router_routes,
-        "mcp_app_attrs": dir(mcp_app)
-    })
+# =============================================
+# STARTUP
+# =============================================
 
-
-# Include all regular routes
-app.include_router(router)
-
-# Mount MCP app at root (last, so it doesn't override other routes)
-app.mount("/mcp", mcp_app, name="mcp")
+print("✅ MCP endpoint configured at /mcp")
+print("✅ Using official MCP SDK - no mounting issues!")
+print("🚀 Server ready to handle MCP requests!")
+print("🎯 Test endpoint: POST /mcp")

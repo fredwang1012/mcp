@@ -1,5 +1,6 @@
-command: ["uvicorn", "src.custom_server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+name: databricks-mcp-server
 
+command: ["uvicorn", "src.custom_server.app:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug"]
 # Environment variables for the app
 env:
   - name: DATABRICKS_HOST
@@ -8,6 +9,10 @@ env:
     value: "a85c850e7621e163"
   - name: LOG_LEVEL
     value: "DEBUG"
+  - name: FORWARDED_ALLOW_IPS
+    value: "*"
+  - name: PROXY_HEADERS_TRUSTED
+    value: "true"
 
 # Enable authentication
 permissions:
