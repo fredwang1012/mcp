@@ -1,6 +1,6 @@
 import time
-print("🚀 Unity Catalog MCP Server - VERSION 7.0 OFFICIAL MCP SDK")
-print("✅ Using official MCP SDK - abandoning FastMCP!")
+print("🚀 Unity Catalog MCP Server - VERSION 7.4 FINAL")
+print("✅ Fixed size_bytes attribute error!")
 print(f"🕒 Server starting at {time.strftime('%Y-%m-%d %H:%M:%S')}")
 print("📍 File path: src/custom_server/app.py")
 
@@ -9,6 +9,7 @@ import json
 import os
 from typing import Any, Dict, List
 from pathlib import Path
+from datetime import datetime
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -42,6 +43,37 @@ def get_databricks_client():
     except Exception as e:
         print(f"❌ Error initializing Databricks client: {e}")
         return None
+
+# =============================================
+# HELPER FUNCTIONS
+# =============================================
+
+def safe_datetime_format(dt_value):
+    """Safely format datetime values to ISO format"""
+    if dt_value is None:
+        return None
+    
+    # If it's already a string, return as is
+    if isinstance(dt_value, str):
+        return dt_value
+    
+    # If it's a datetime object, format it
+    if hasattr(dt_value, 'isoformat'):
+        return dt_value.isoformat()
+    
+    # If it's a number (Unix timestamp), convert to datetime first
+    if isinstance(dt_value, (int, float)):
+        try:
+            return datetime.fromtimestamp(dt_value / 1000 if dt_value > 1e10 else dt_value).isoformat()
+        except (ValueError, OSError):
+            return str(dt_value)
+    
+    # Default: convert to string
+    return str(dt_value) if dt_value is not None else None
+
+def safe_get_attribute(obj, attr_name, default=None):
+    """Safely get attribute from object, return default if not exists"""
+    return getattr(obj, attr_name, default)
 
 # =============================================
 # MCP SERVER SETUP
@@ -141,80 +173,168 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
         
         if name == "query_sql":
             query = arguments.get("query", "")
-            with client.sql.statement_execution.create(query=query, warehouse_id=DATABRICKS_WAREHOUSE_ID) as cursor:
-                result = cursor.fetchall()
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"✅ Query executed successfully. Results: {json.dumps(result, indent=2)}")]
-            )
+            if not query:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="❌ Error: query is required")]
+                )
+            
+            try:
+                # Use the correct SQL execution method
+                result = client.statement_execution.execute_statement(
+                    statement=query,
+                    warehouse_id=DATABRICKS_WAREHOUSE_ID,
+                    wait_timeout="30s"
+                )
+                
+                # Get results
+                if result.result and result.result.data_array:
+                    results = result.result.data_array
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=f"✅ Query executed successfully. Results: {json.dumps(results, indent=2)}")]
+                    )
+                else:
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=f"✅ Query executed successfully. No data returned.")]
+                    )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ SQL execution failed: {str(e)}")]
+                )
         
         elif name == "list_catalogs":
-            catalogs = list(client.catalogs.list())
-            catalog_names = [catalog.name for catalog in catalogs]
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"✅ Available catalogs: {json.dumps(catalog_names, indent=2)}")]
-            )
+            try:
+                catalogs = list(client.catalogs.list())
+                catalog_names = [catalog.name for catalog in catalogs]
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"✅ Available catalogs: {json.dumps(catalog_names, indent=2)}")]
+                )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ Error listing catalogs: {str(e)}")]
+                )
         
         elif name == "list_schemas":
             catalog_name = arguments.get("catalog_name", "")
-            schemas = list(client.schemas.list(catalog_name=catalog_name))
-            schema_names = [schema.name for schema in schemas]
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"✅ Schemas in catalog '{catalog_name}': {json.dumps(schema_names, indent=2)}")]
-            )
+            if not catalog_name:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="❌ Error: catalog_name is required")]
+                )
+            
+            try:
+                schemas = list(client.schemas.list(catalog_name=catalog_name))
+                schema_names = [schema.name for schema in schemas]
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"✅ Schemas in catalog '{catalog_name}': {json.dumps(schema_names, indent=2)}")]
+                )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ Error listing schemas: {str(e)}")]
+                )
         
         elif name == "list_tables":
             catalog_name = arguments.get("catalog_name", "")
             schema_name = arguments.get("schema_name", "")
-            tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema_name))
-            table_names = [table.name for table in tables]
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"✅ Tables in schema '{catalog_name}.{schema_name}': {json.dumps(table_names, indent=2)}")]
-            )
+            
+            if not catalog_name or not schema_name:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="❌ Error: catalog_name and schema_name are required")]
+                )
+            
+            try:
+                tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema_name))
+                table_names = [table.name for table in tables]
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"✅ Tables in schema '{catalog_name}.{schema_name}': {json.dumps(table_names, indent=2)}")]
+                )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ Error listing tables: {str(e)}")]
+                )
         
         elif name == "describe_table":
             catalog_name = arguments.get("catalog_name", "")
             schema_name = arguments.get("schema_name", "")
             table_name = arguments.get("table_name", "")
-            table = client.tables.get(full_name=f"{catalog_name}.{schema_name}.{table_name}")
             
-            table_info = {
-                "name": table.name,
-                "catalog": table.catalog_name,
-                "schema": table.schema_name,
-                "table_type": table.table_type,
-                "data_source_format": table.data_source_format,
-                "columns": [{"name": col.name, "type": col.type_name} for col in table.columns] if table.columns else [],
-                "comment": table.comment
-            }
+            if not catalog_name or not schema_name or not table_name:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="❌ Error: catalog_name, schema_name, and table_name are required")]
+                )
             
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"✅ Table details: {json.dumps(table_info, indent=2)}")]
-            )
+            try:
+                table = client.tables.get(full_name=f"{catalog_name}.{schema_name}.{table_name}")
+                
+                # Handle JSON serialization properly with safe attribute access
+                def serialize_column(col):
+                    """Serialize column info to JSON-safe format"""
+                    return {
+                        "name": col.name,
+                        "type": str(col.type_name) if col.type_name else None,
+                        "type_text": safe_get_attribute(col, 'type_text'),
+                        "nullable": safe_get_attribute(col, 'nullable'),
+                        "comment": safe_get_attribute(col, 'comment'),
+                        "type_precision": safe_get_attribute(col, 'type_precision'),
+                        "type_scale": safe_get_attribute(col, 'type_scale')
+                    }
+                
+                table_info = {
+                    "name": table.name,
+                    "catalog": table.catalog_name,
+                    "schema": table.schema_name,
+                    "table_type": table.table_type.value if table.table_type else None,
+                    "data_source_format": table.data_source_format.value if table.data_source_format else None,
+                    "columns": [serialize_column(col) for col in (table.columns or [])],
+                    "comment": safe_get_attribute(table, 'comment'),
+                    "owner": safe_get_attribute(table, 'owner'),
+                    "storage_location": safe_get_attribute(table, 'storage_location'),
+                    "created_at": safe_datetime_format(safe_get_attribute(table, 'created_at')),
+                    "updated_at": safe_datetime_format(safe_get_attribute(table, 'updated_at')),
+                    "table_id": safe_get_attribute(table, 'table_id'),
+                    "size_bytes": safe_get_attribute(table, 'size_bytes')  # FIXED: Safe attribute access
+                }
+                
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"✅ Table details: {json.dumps(table_info, indent=2)}")]
+                )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ Error describing table: {str(e)}")]
+                )
         
         elif name == "search_tables":
             catalog_name = arguments.get("catalog_name", "")
             query = arguments.get("query", "")
             
-            schemas = list(client.schemas.list(catalog_name=catalog_name))
-            matching_tables = []
+            if not catalog_name or not query:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="❌ Error: catalog_name and query are required")]
+                )
             
-            for schema in schemas:
-                try:
-                    tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema.name))
-                    for table in tables:
-                        if query.lower() in table.name.lower():
-                            matching_tables.append({
-                                "full_name": f"{catalog_name}.{schema.name}.{table.name}",
-                                "name": table.name,
-                                "schema": schema.name,
-                                "table_type": table.table_type
-                            })
-                except Exception:
-                    continue
-            
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"✅ Found {len(matching_tables)} tables matching '{query}': {json.dumps(matching_tables, indent=2)}")]
-            )
+            try:
+                schemas = list(client.schemas.list(catalog_name=catalog_name))
+                matching_tables = []
+                
+                for schema in schemas:
+                    try:
+                        tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema.name))
+                        for table in tables:
+                            if query.lower() in table.name.lower():
+                                matching_tables.append({
+                                    "full_name": f"{catalog_name}.{schema.name}.{table.name}",
+                                    "name": table.name,
+                                    "schema": schema.name,
+                                    "table_type": table.table_type.value if table.table_type else None
+                                })
+                    except Exception:
+                        continue
+                
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"✅ Found {len(matching_tables)} tables matching '{query}': {json.dumps(matching_tables, indent=2)}")]
+                )
+            except Exception as e:
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"❌ Error searching tables: {str(e)}")]
+                )
         
         else:
             return CallToolResult(
@@ -235,7 +355,7 @@ print("✅ MCP tools registered successfully!")
 app = FastAPI(
     title="Unity Catalog MCP Server",
     description="MCP server for Unity Catalog integration using official SDK",
-    version="7.0",
+    version="7.4",
     redirect_slashes=False
 )
 
@@ -253,7 +373,7 @@ async def home():
     """Home page"""
     return {
         "message": "Unity Catalog MCP Server", 
-        "version": "7.0", 
+        "version": "7.4", 
         "status": "running",
         "approach": "official_mcp_sdk"
     }
@@ -329,7 +449,7 @@ async def mcp_endpoint(request: Request):
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {
                         "name": "unity-catalog-mcp",
-                        "version": "7.0"
+                        "version": "7.4"
                     },
                     "capabilities": {
                         "tools": {}
@@ -409,7 +529,7 @@ async def mcp_get():
             "message": "MCP endpoint",
             "method": "POST required",
             "server": "unity-catalog-mcp",
-            "version": "7.0",
+            "version": "7.4",
             "approach": "official_mcp_sdk"
         }
     )
@@ -419,6 +539,6 @@ async def mcp_get():
 # =============================================
 
 print("✅ MCP endpoint configured at /mcp")
-print("✅ Using official MCP SDK - no mounting issues!")
+print("✅ Fixed size_bytes attribute error - all tools should work now!")
 print("🚀 Server ready to handle MCP requests!")
 print("🎯 Test endpoint: POST /mcp")
