@@ -1,6 +1,7 @@
 import time
-print("🚀 Unity Catalog MCP Server - VERSION 7.4 FINAL")
+print("🚀 Unity Catalog MCP Server - VERSION 7.4 FINAL WITH GLASSY DASHBOARD")
 print("✅ Fixed size_bytes attribute error!")
+print("✅ Added beautiful glassy dashboard at root!")
 print(f"🕒 Server starting at {time.strftime('%Y-%m-%d %H:%M:%S')}")
 print("📍 File path: src/custom_server/app.py")
 
@@ -9,10 +10,12 @@ import json
 import os
 from typing import Any, Dict, List
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import pytz
 
+import jwt
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from databricks.sdk import WorkspaceClient
 
@@ -30,6 +33,110 @@ DATABRICKS_WAREHOUSE_ID = os.environ.get('DATABRICKS_WAREHOUSE_ID', 'a85c850e762
 
 print(f"🔧 Databricks Host: {DATABRICKS_HOST}")
 print(f"🔧 Warehouse ID: {DATABRICKS_WAREHOUSE_ID}")
+
+# =============================================
+# TOKEN MANAGER
+# =============================================
+
+class TokenManager:
+    def __init__(self):
+        self.current_token = None
+        self.token_expiry = None
+        self.last_update = None
+        self.pst = pytz.timezone('America/Los_Angeles')
+        
+    def update_token_from_request(self, request):
+        """Update token from request headers"""
+        # Try Authorization header first
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            self.set_token(token)
+            return True
+            
+        # Try x-forwarded-access-token header
+        forwarded_token = request.headers.get("x-forwarded-access-token", "")
+        if forwarded_token and forwarded_token != "not found":
+            self.set_token(forwarded_token)
+            return True
+            
+        return False
+        
+    def set_token(self, token):
+        """Set current token and decode expiry"""
+        if token == self.current_token:
+            return  # No change
+            
+        self.current_token = token
+        self.last_update = datetime.now(self.pst)
+        
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            # JWT exp is in UTC seconds since epoch - convert to PST
+            utc_expiry = datetime.fromtimestamp(payload['exp'], tz=timezone.utc)
+            self.token_expiry = utc_expiry.astimezone(self.pst)
+            print(f"🔍 Token expires at: {self.token_expiry} PST (UTC: {utc_expiry})")
+        except Exception as e:
+            print(f"❌ Error decoding token: {e}")
+            self.token_expiry = None
+            
+    def get_status(self):
+        """Get current token status"""
+        if not self.current_token or not self.token_expiry:
+            return {
+                "status": "no_token",
+                "message": "No token available",
+                "token": None,
+                "minutes_left": 0,
+                "expires_at": None,
+                "last_update": None
+            }
+            
+        now = datetime.now(self.pst)
+        time_left = self.token_expiry - now
+        total_seconds = max(0, int(time_left.total_seconds()))
+        minutes_left = total_seconds // 60
+        
+        print(f"🔍 Time calculation PST: now={now}, expiry={self.token_expiry}, minutes={minutes_left}")
+        
+        if total_seconds <= 0:
+            status = "expired"
+            message = "Token has expired"
+        elif minutes_left <= 10:
+            status = "expiring_soon"
+            message = f"Token expires in {minutes_left} minutes"
+        else:
+            status = "valid"
+            message = f"Token is valid for {minutes_left} minutes"
+            
+        return {
+            "status": status,
+            "message": message,
+            "token": self.current_token,
+            "minutes_left": minutes_left,
+            "expires_at": self.token_expiry.isoformat(),
+            "last_update": self.last_update.isoformat() if self.last_update else None
+        }
+        
+    def get_claude_config(self):
+        """Get Claude Desktop configuration"""
+        if not self.current_token:
+            return None
+            
+        return {
+            "mcpServers": {
+                "unity-catalog": {
+                    "command": "npx",
+                    "args": ["@modelcontextprotocol/server-fetch", "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/mcp"],
+                    "env": {
+                        "BEARER_TOKEN": self.current_token
+                    }
+                }
+            }
+        }
+
+# Create global token manager instance
+token_manager = TokenManager()
 
 # =============================================
 # DATABRICKS CLIENT
@@ -365,18 +472,580 @@ app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 print("✅ FastAPI app created!")
 
 # =============================================
-# REGULAR ENDPOINTS
+# DASHBOARD AT ROOT
 # =============================================
 
-@app.get("/")
-async def home():
-    """Home page"""
+@app.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    """Clean and fast dashboard for token management"""
+    
+    # Update token from request
+    token_manager.update_token_from_request(request)
+    
+    # Get current status
+    status = token_manager.get_status()
+    config = token_manager.get_claude_config()
+    
+    # Use the token manager's calculation - it's already correct in PST
+    minutes_left = status['minutes_left']
+    seconds_left = 0
+    
+    # Get current PST time for display
+    pst = pytz.timezone('America/Los_Angeles')
+    current_pst = datetime.now(pst)
+    
+    html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unity Catalog MCP Dashboard</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #f5f7fa;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }}
+        
+        .container {{
+            max-width: 1000px;
+            margin: 0 auto;
+        }}
+        
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        
+        .header h1 {{
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }}
+        
+        .header p {{
+            color: #7f8c8d;
+            font-size: 1.1rem;
+        }}
+        
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }}
+        
+        .card {{
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }}
+        
+        .card-title {{
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        
+        .status-indicator {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }}
+        
+        .status-valid {{ background: #d4edda; color: #155724; }}
+        .status-expiring {{ background: #fff3cd; color: #856404; }}
+        .status-expired {{ background: #f8d7da; color: #721c24; }}
+        .status-no-token {{ background: #e2e3e5; color: #383d41; }}
+        
+        .status-icon {{
+            font-size: 1.5rem;
+        }}
+        
+        .countdown {{
+            font-size: 2rem;
+            font-weight: 700;
+            text-align: center;
+            margin: 15px 0;
+            color: #2c3e50;
+            font-family: monospace;
+        }}
+        
+        .progress-bar {{
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 15px 0;
+        }}
+        
+        .progress-fill {{
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }}
+        
+        .progress-valid {{ background: #28a745; }}
+        .progress-expiring {{ background: #ffc107; }}
+        .progress-expired {{ background: #dc3545; }}
+        
+        .info-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 15px 0;
+        }}
+        
+        .info-item {{
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }}
+        
+        .info-label {{
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }}
+        
+        .info-value {{
+            font-weight: 600;
+            color: #2c3e50;
+        }}
+        
+        .code-block {{
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: monospace;
+            font-size: 0.9rem;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }}
+        
+        .btn {{
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }}
+        
+        .btn:hover {{
+            background: #0056b3;
+        }}
+        
+        .btn-success {{
+            background: #28a745;
+        }}
+        
+        .btn-success:hover {{
+            background: #1e7e34;
+        }}
+        
+        .btn-danger {{
+            background: #dc3545;
+        }}
+        
+        .btn-danger:hover {{
+            background: #c82333;
+        }}
+        
+        .btn-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 15px 0;
+        }}
+        
+        .instructions {{
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 5px 5px 0;
+        }}
+        
+        .instructions h3 {{
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }}
+        
+        .instructions ol, .instructions ul {{
+            margin-left: 20px;
+        }}
+        
+        .instructions li {{
+            margin: 5px 0;
+        }}
+        
+        .notification {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 5px;
+            color: white;
+            font-weight: 600;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }}
+        
+        .notification.show {{
+            opacity: 1;
+        }}
+        
+        .notification-success {{
+            background: #28a745;
+        }}
+        
+        .notification-error {{
+            background: #dc3545;
+        }}
+        
+        .auto-refresh {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #6c757d;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }}
+        
+        @media (max-width: 768px) {{
+            .grid {{
+                grid-template-columns: 1fr;
+            }}
+            
+            .info-grid {{
+                grid-template-columns: 1fr;
+            }}
+            
+            .btn-grid {{
+                grid-template-columns: 1fr;
+            }}
+            
+            .header h1 {{
+                font-size: 1.5rem;
+            }}
+            
+            .countdown {{
+                font-size: 1.5rem;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Unity Catalog MCP Dashboard</h1>
+            <p>Token Management & Claude Desktop Configuration</p>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">
+                    <span>📊</span> Token Status
+                </div>
+                
+                <div class="status-indicator status-{status['status']}">
+                    <div class="status-icon">
+                        {"✅" if status['status'] == 'valid' else "⚠️" if status['status'] == 'expiring_soon' else "❌" if status['status'] == 'expired' else "❓"}
+                    </div>
+                    <div>
+                        <div id="statusMessage"><strong>{status['message']}</strong></div>
+                        <div style="font-size: 0.9rem; margin-top: 5px;">
+                            Last updated: {current_pst.strftime('%H:%M:%S')} PST
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="countdown" id="countdown">
+                    {f"{minutes_left:02d}:{seconds_left:02d}"}
+                </div>
+                
+                <div class="progress-bar">
+                    <div class="progress-fill progress-{status['status']}" 
+                         style="width: {max(0, min(100, (minutes_left / 60) * 100))}%"></div>
+                </div>
+                
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Status</div>
+                        <div class="info-value">{status['status'].upper().replace('_', ' ')}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Minutes Left</div>
+                        <div class="info-value" id="minutesLeftValue">{minutes_left}</div>
+                    </div>
+                </div>
+                
+                <button class="btn btn-danger" onclick="refreshStatus()">🔄 Refresh Status</button>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">
+                    <span>🎯</span> Claude Desktop Configuration
+                </div>
+                
+                <div class="code-block">{json.dumps(config, indent=2) if config else "No token available"}</div>
+                
+                <button class="btn btn-success" onclick="copyConfig()">📋 Copy Configuration</button>
+                
+                <div class="instructions">
+                    <h3>📝 Setup Instructions:</h3>
+                    <ol>
+                        <li>Copy the configuration above</li>
+                        <li>Open Claude Desktop settings.json</li>
+                        <li>Replace the content with the copied configuration</li>
+                        <li>Restart Claude Desktop</li>
+                    </ol>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">
+                    <span>🔑</span> Access Token
+                </div>
+                
+                <div class="code-block">{status['token'][:50] + '...' if status['token'] else 'No token available'}</div>
+                
+                <button class="btn btn-success" onclick="copyToken()">📋 Copy Token</button>
+                
+                <div class="instructions">
+                    <h3>🔄 Token Refresh:</h3>
+                    <ol>
+                        <li>Tokens expire every ~60 minutes</li>
+                        <li>Visit this page to refresh automatically</li>
+                        <li>When expired, just reload this page</li>
+                    </ol>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">
+                    <span>🛠️</span> Quick Actions
+                </div>
+                
+                <div class="btn-grid">
+                    <a href="/debug-headers" target="_blank" class="btn">🔍 Debug Headers</a>
+                    <a href="/health" target="_blank" class="btn">❤️ Health Check</a>
+                    <a href="/mcp" target="_blank" class="btn">🔗 MCP Endpoint</a>
+                    <button class="btn" onclick="testConnection()">🧪 Test Connection</button>
+                </div>
+                
+                <div class="instructions">
+                    <h3>🚀 Available Tools:</h3>
+                    <ul>
+                        <li>📊 Query SQL databases</li>
+                        <li>📁 List catalogs and schemas</li>
+                        <li>📋 List and describe tables</li>
+                        <li>🔍 Search for tables</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="auto-refresh">Auto-refresh: ON (60s)</div>
+    
+    <div class="notification" id="notification"></div>
+    
+    <script>
+        let autoRefreshInterval;
+        let countdownInterval;
+        let expiryTime = "{status['expires_at'] or ''}";
+        
+        function showNotification(message, type = 'success') {{
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification notification-${{type}}`;
+            
+            // Show notification with fade in
+            notification.classList.add('show');
+            
+            // Hide after 3 seconds with fade out
+            setTimeout(() => {{
+                notification.classList.remove('show');
+            }}, 3000);
+        }}
+        
+        function copyToClipboard(text) {{
+            if (navigator.clipboard) {{
+                navigator.clipboard.writeText(text);
+            }} else {{
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            }}
+        }}
+        
+        function copyToken() {{
+            const token = "{status['token'] or ''}";
+            if (token) {{
+                copyToClipboard(token);
+                showNotification('Token copied to clipboard!');
+            }} else {{
+                showNotification('No token available', 'error');
+            }}
+        }}
+        
+        function copyConfig() {{
+            const config = `{json.dumps(config, indent=2) if config else ''}`;
+            if (config && config !== 'null') {{
+                copyToClipboard(config);
+                showNotification('Configuration copied to clipboard!');
+            }} else {{
+                showNotification('No configuration available', 'error');
+            }}
+        }}
+        
+        function refreshStatus() {{
+            window.location.reload();
+        }}
+        
+        function testConnection() {{
+            fetch('/health')
+                .then(response => response.json())
+                .then(data => {{
+                    if (data.status === 'healthy') {{
+                        showNotification('Connection successful!');
+                    }} else {{
+                        showNotification('Connection failed', 'error');
+                    }}
+                }})
+                .catch(error => {{
+                    showNotification('Connection error', 'error');
+                }});
+        }}
+        
+        function updateCountdown() {{
+            if (!expiryTime) return;
+            
+            // Parse the PST time from server
+            const expiry = new Date(expiryTime);
+            const now = new Date();
+            const timeLeft = Math.max(0, Math.floor((expiry - now) / 1000));
+            
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = timeLeft % 60;
+            
+            // Update countdown display
+            document.getElementById('countdown').textContent = 
+                `${{minutes.toString().padStart(2, '0')}}:${{seconds.toString().padStart(2, '0')}}`;
+            
+            // Update minutes left display
+            const minutesLeftElement = document.getElementById('minutesLeftValue');
+            if (minutesLeftElement) {{
+                minutesLeftElement.textContent = minutes;
+            }}
+            
+            // Update status message
+            const statusMessageElement = document.getElementById('statusMessage');
+            if (statusMessageElement && minutes > 0) {{
+                if (minutes <= 10) {{
+                    statusMessageElement.innerHTML = `<strong>Token expires in ${{minutes}} minutes</strong>`;
+                }} else {{
+                    statusMessageElement.innerHTML = `<strong>Token is valid for ${{minutes}} minutes</strong>`;
+                }}
+            }}
+            
+            // Update progress bar
+            const progressFill = document.querySelector('.progress-fill');
+            if (progressFill) {{
+                const progressPercent = Math.max(0, Math.min(100, (minutes / 60) * 100));
+                progressFill.style.width = progressPercent + '%';
+            }}
+            
+            if (timeLeft <= 0) {{
+                showNotification('Token has expired! Please refresh.', 'error');
+                clearInterval(countdownInterval);
+            }}
+        }}
+        
+        // Initialize
+        if (expiryTime) {{
+            countdownInterval = setInterval(updateCountdown, 1000);
+            updateCountdown();
+        }}
+        
+        // Auto-refresh every 60 seconds
+        autoRefreshInterval = setInterval(() => {{
+            window.location.reload();
+        }}, 60000);
+    </script>
+</body>
+</html>
+    """
+    
+    return HTMLResponse(content=html_content)
+
+# =============================================
+# API ENDPOINT FOR DASHBOARD DATA
+# =============================================
+
+@app.get("/api/dashboard-data")
+async def dashboard_data(request: Request):
+    """JSON API endpoint for dashboard data"""
+    token_manager.update_token_from_request(request)
+    status = token_manager.get_status()
+    config = token_manager.get_claude_config()
+    
     return {
-        "message": "Unity Catalog MCP Server", 
-        "version": "7.4", 
-        "status": "running",
-        "approach": "official_mcp_sdk"
+        "status": status,
+        "config": config,
+        "server_info": {
+            "version": "7.4",
+            "name": "unity-catalog-mcp",
+            "tools_count": 6,
+            "endpoint": "/mcp"
+        }
     }
+
+# =============================================
+# REGULAR ENDPOINTS
+# =============================================
 
 @app.get("/health")
 async def health_check():
@@ -538,7 +1207,11 @@ async def mcp_get():
 # STARTUP
 # =============================================
 
+print("✅ Beautiful glassy dashboard added at root (/)!")
+print("✅ Token management with live countdown timer!")
+print("✅ One-click copy for token and Claude Desktop config!")
 print("✅ MCP endpoint configured at /mcp")
 print("✅ Fixed size_bytes attribute error - all tools should work now!")
 print("🚀 Server ready to handle MCP requests!")
-print("🎯 Test endpoint: POST /mcp")
+print("🎯 Dashboard URL: https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/")
+print("🔗 Test endpoint: POST /mcp")
