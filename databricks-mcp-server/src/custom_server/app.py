@@ -1,7 +1,7 @@
 import time
-print("🚀 Unity Catalog MCP Server - VERSION 7.4 FINAL WITH GLASSY DASHBOARD")
-print("✅ Fixed size_bytes attribute error!")
-print("✅ Added beautiful glassy dashboard at root!")
+print("🚀 Unity Catalog MCP Server - VERSION 7.5 SQL-ONLY")
+print("✅ All tools now use SQL instead of SDK calls!")
+print("✅ Fixed authentication mismatch with Databricks Apps!")
 print(f"🕒 Server starting at {time.strftime('%Y-%m-%d %H:%M:%S')}")
 print("📍 File path: src/custom_server/app.py")
 
@@ -152,6 +152,30 @@ def get_databricks_client():
         return None
 
 # =============================================
+# SQL EXECUTION HELPER
+# =============================================
+
+def execute_sql_query(client, query):
+    """Execute SQL query using the same method that works for permissions"""
+    try:
+        print(f"🔍 Executing SQL: {query}")
+        result = client.statement_execution.execute_statement(
+            statement=query,
+            warehouse_id=DATABRICKS_WAREHOUSE_ID,
+            wait_timeout="30s"
+        )
+        
+        if result.result and result.result.data_array:
+            print(f"✅ SQL Success: {len(result.result.data_array)} rows returned")
+            return result.result.data_array
+        else:
+            print("✅ SQL Success: No data returned")
+            return []
+    except Exception as e:
+        print(f"❌ SQL Error: {str(e)}")
+        raise Exception(f"SQL execution failed: {str(e)}")
+
+# =============================================
 # HELPER FUNCTIONS
 # =============================================
 
@@ -270,7 +294,7 @@ async def list_tools() -> List[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
-    """Handle tool calls"""
+    """Handle tool calls using SQL for everything"""
     try:
         client = get_databricks_client()
         if not client:
@@ -286,23 +310,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                 )
             
             try:
-                # Use the correct SQL execution method
-                result = client.statement_execution.execute_statement(
-                    statement=query,
-                    warehouse_id=DATABRICKS_WAREHOUSE_ID,
-                    wait_timeout="30s"
+                results = execute_sql_query(client, query)
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"✅ Query executed successfully. Results: {json.dumps(results, indent=2)}")]
                 )
-                
-                # Get results
-                if result.result and result.result.data_array:
-                    results = result.result.data_array
-                    return CallToolResult(
-                        content=[TextContent(type="text", text=f"✅ Query executed successfully. Results: {json.dumps(results, indent=2)}")]
-                    )
-                else:
-                    return CallToolResult(
-                        content=[TextContent(type="text", text=f"✅ Query executed successfully. No data returned.")]
-                    )
             except Exception as e:
                 return CallToolResult(
                     content=[TextContent(type="text", text=f"❌ SQL execution failed: {str(e)}")]
@@ -310,8 +321,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
         
         elif name == "list_catalogs":
             try:
-                catalogs = list(client.catalogs.list())
-                catalog_names = [catalog.name for catalog in catalogs]
+                # Use SQL instead of SDK
+                results = execute_sql_query(client, "SHOW CATALOGS")
+                catalog_names = [row[0] for row in results]  # First column contains catalog names
                 return CallToolResult(
                     content=[TextContent(type="text", text=f"✅ Available catalogs: {json.dumps(catalog_names, indent=2)}")]
                 )
@@ -328,8 +340,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                 )
             
             try:
-                schemas = list(client.schemas.list(catalog_name=catalog_name))
-                schema_names = [schema.name for schema in schemas]
+                # Use SQL instead of SDK
+                query = f"SHOW SCHEMAS IN {catalog_name}"
+                results = execute_sql_query(client, query)
+                schema_names = [row[0] for row in results]  # First column contains schema names
                 return CallToolResult(
                     content=[TextContent(type="text", text=f"✅ Schemas in catalog '{catalog_name}': {json.dumps(schema_names, indent=2)}")]
                 )
@@ -348,8 +362,10 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                 )
             
             try:
-                tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema_name))
-                table_names = [table.name for table in tables]
+                # Use SQL instead of SDK
+                query = f"SHOW TABLES IN {catalog_name}.{schema_name}"
+                results = execute_sql_query(client, query)
+                table_names = [row[0] for row in results]  # First column contains table names
                 return CallToolResult(
                     content=[TextContent(type="text", text=f"✅ Tables in schema '{catalog_name}.{schema_name}': {json.dumps(table_names, indent=2)}")]
                 )
@@ -369,36 +385,48 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                 )
             
             try:
-                table = client.tables.get(full_name=f"{catalog_name}.{schema_name}.{table_name}")
+                # Use SQL instead of SDK
+                full_table_name = f"{catalog_name}.{schema_name}.{table_name}"
                 
-                # Handle JSON serialization properly with safe attribute access
-                def serialize_column(col):
-                    """Serialize column info to JSON-safe format"""
-                    return {
-                        "name": col.name,
-                        "type": str(col.type_name) if col.type_name else None,
-                        "type_text": safe_get_attribute(col, 'type_text'),
-                        "nullable": safe_get_attribute(col, 'nullable'),
-                        "comment": safe_get_attribute(col, 'comment'),
-                        "type_precision": safe_get_attribute(col, 'type_precision'),
-                        "type_scale": safe_get_attribute(col, 'type_scale')
-                    }
+                # Get table description
+                describe_query = f"DESCRIBE TABLE {full_table_name}"
+                describe_results = execute_sql_query(client, describe_query)
                 
+                # Parse column information
+                columns = []
+                for row in describe_results:
+                    if len(row) >= 2:  # At least column name and type
+                        columns.append({
+                            "name": row[0],
+                            "type": row[1],
+                            "comment": row[2] if len(row) > 2 and row[2] else None
+                        })
+                
+                # Get table properties
                 table_info = {
-                    "name": table.name,
-                    "catalog": table.catalog_name,
-                    "schema": table.schema_name,
-                    "table_type": table.table_type.value if table.table_type else None,
-                    "data_source_format": table.data_source_format.value if table.data_source_format else None,
-                    "columns": [serialize_column(col) for col in (table.columns or [])],
-                    "comment": safe_get_attribute(table, 'comment'),
-                    "owner": safe_get_attribute(table, 'owner'),
-                    "storage_location": safe_get_attribute(table, 'storage_location'),
-                    "created_at": safe_datetime_format(safe_get_attribute(table, 'created_at')),
-                    "updated_at": safe_datetime_format(safe_get_attribute(table, 'updated_at')),
-                    "table_id": safe_get_attribute(table, 'table_id'),
-                    "size_bytes": safe_get_attribute(table, 'size_bytes')  # FIXED: Safe attribute access
+                    "name": table_name,
+                    "catalog": catalog_name,
+                    "schema": schema_name,
+                    "full_name": full_table_name,
+                    "columns": columns,
+                    "column_count": len(columns)
                 }
+                
+                # Try to get additional table information
+                try:
+                    detail_query = f"DESCRIBE DETAIL {full_table_name}"
+                    detail_results = execute_sql_query(client, detail_query)
+                    if detail_results and len(detail_results) > 0:
+                        # Detail results vary, but typically have format, size, etc.
+                        detail_row = detail_results[0]
+                        if len(detail_row) > 5:  # If we have detailed info
+                            table_info["table_format"] = detail_row[0] if len(detail_row) > 0 else None
+                            table_info["location"] = detail_row[1] if len(detail_row) > 1 else None
+                            table_info["size_bytes"] = detail_row[2] if len(detail_row) > 2 else None
+                            table_info["created_at"] = detail_row[3] if len(detail_row) > 3 else None
+                except Exception as detail_error:
+                    # If DESCRIBE DETAIL fails, continue without detailed info
+                    print(f"⚠️ Could not get detailed table info: {detail_error}")
                 
                 return CallToolResult(
                     content=[TextContent(type="text", text=f"✅ Table details: {json.dumps(table_info, indent=2)}")]
@@ -410,33 +438,44 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
         
         elif name == "search_tables":
             catalog_name = arguments.get("catalog_name", "")
-            query = arguments.get("query", "")
+            search_query = arguments.get("query", "")
             
-            if not catalog_name or not query:
+            if not catalog_name or not search_query:
                 return CallToolResult(
                     content=[TextContent(type="text", text="❌ Error: catalog_name and query are required")]
                 )
             
             try:
-                schemas = list(client.schemas.list(catalog_name=catalog_name))
+                # First get all schemas in the catalog
+                schemas_query = f"SHOW SCHEMAS IN {catalog_name}"
+                schema_results = execute_sql_query(client, schemas_query)
+                schema_names = [row[0] for row in schema_results]
+                
                 matching_tables = []
                 
-                for schema in schemas:
+                for schema_name in schema_names:
                     try:
-                        tables = list(client.tables.list(catalog_name=catalog_name, schema_name=schema.name))
-                        for table in tables:
-                            if query.lower() in table.name.lower():
+                        # Get tables in this schema
+                        tables_query = f"SHOW TABLES IN {catalog_name}.{schema_name}"
+                        table_results = execute_sql_query(client, tables_query)
+                        
+                        for table_row in table_results:
+                            table_name = table_row[0]
+                            # Search for matching table names
+                            if search_query.lower() in table_name.lower():
                                 matching_tables.append({
-                                    "full_name": f"{catalog_name}.{schema.name}.{table.name}",
-                                    "name": table.name,
-                                    "schema": schema.name,
-                                    "table_type": table.table_type.value if table.table_type else None
+                                    "full_name": f"{catalog_name}.{schema_name}.{table_name}",
+                                    "name": table_name,
+                                    "schema": schema_name,
+                                    "catalog": catalog_name
                                 })
-                    except Exception:
+                    except Exception as schema_error:
+                        # Skip schemas we can't access
+                        print(f"⚠️ Could not access schema {schema_name}: {schema_error}")
                         continue
                 
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"✅ Found {len(matching_tables)} tables matching '{query}': {json.dumps(matching_tables, indent=2)}")]
+                    content=[TextContent(type="text", text=f"✅ Found {len(matching_tables)} tables matching '{search_query}': {json.dumps(matching_tables, indent=2)}")]
                 )
             except Exception as e:
                 return CallToolResult(
@@ -461,8 +500,8 @@ print("✅ MCP tools registered successfully!")
 
 app = FastAPI(
     title="Unity Catalog MCP Server",
-    description="MCP server for Unity Catalog integration using official SDK",
-    version="7.4",
+    description="MCP server for Unity Catalog integration using SQL only",
+    version="7.5",
     redirect_slashes=False
 )
 
@@ -750,6 +789,15 @@ async def dashboard(request: Request):
             font-size: 0.9rem;
         }}
         
+        .version-badge {{
+            background: #17a2b8;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            margin-left: 10px;
+        }}
+        
         @media (max-width: 768px) {{
             .grid {{
                 grid-template-columns: 1fr;
@@ -776,7 +824,7 @@ async def dashboard(request: Request):
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Unity Catalog MCP Dashboard</h1>
+            <h1>🚀 Unity Catalog MCP Dashboard <span class="version-badge">v7.5 SQL-Only</span></h1>
             <p>Token Management & Claude Desktop Configuration</p>
         </div>
         
@@ -873,7 +921,7 @@ async def dashboard(request: Request):
                 </div>
                 
                 <div class="instructions">
-                    <h3>🚀 Available Tools:</h3>
+                    <h3>🚀 Available Tools (SQL-Only):</h3>
                     <ul>
                         <li>📊 Query SQL databases</li>
                         <li>📁 List catalogs and schemas</li>
@@ -1036,10 +1084,11 @@ async def dashboard_data(request: Request):
         "status": status,
         "config": config,
         "server_info": {
-            "version": "7.4",
+            "version": "7.5",
             "name": "unity-catalog-mcp",
             "tools_count": 6,
-            "endpoint": "/mcp"
+            "endpoint": "/mcp",
+            "approach": "sql_only"
         }
     }
 
@@ -1053,7 +1102,8 @@ async def health_check():
     return {
         "status": "healthy", 
         "service": "Unity Catalog MCP Server",
-        "mcp_sdk": "official",
+        "version": "7.5",
+        "approach": "sql_only",
         "endpoint": "/mcp"
     }
 
@@ -1079,7 +1129,8 @@ async def debug_mcp():
     return {
         "message": "MCP server info",
         "server_name": "unity-catalog-mcp",
-        "approach": "official_mcp_sdk",
+        "version": "7.5",
+        "approach": "sql_only",
         "tools_count": 6,
         "endpoint": "/mcp",
         "ready": True
@@ -1118,7 +1169,7 @@ async def mcp_endpoint(request: Request):
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {
                         "name": "unity-catalog-mcp",
-                        "version": "7.4"
+                        "version": "7.5"
                     },
                     "capabilities": {
                         "tools": {}
@@ -1198,8 +1249,8 @@ async def mcp_get():
             "message": "MCP endpoint",
             "method": "POST required",
             "server": "unity-catalog-mcp",
-            "version": "7.4",
-            "approach": "official_mcp_sdk"
+            "version": "7.5",
+            "approach": "sql_only"
         }
     )
 
@@ -1207,11 +1258,11 @@ async def mcp_get():
 # STARTUP
 # =============================================
 
-print("✅ Beautiful glassy dashboard added at root (/)!")
+print("✅ Beautiful dashboard updated to v7.5 SQL-Only!")
 print("✅ Token management with live countdown timer!")
 print("✅ One-click copy for token and Claude Desktop config!")
 print("✅ MCP endpoint configured at /mcp")
-print("✅ Fixed size_bytes attribute error - all tools should work now!")
+print("✅ All tools now use SQL instead of SDK - authentication should work!")
 print("🚀 Server ready to handle MCP requests!")
 print("🎯 Dashboard URL: https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/")
 print("🔗 Test endpoint: POST /mcp")
