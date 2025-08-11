@@ -26,6 +26,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+
 # PyInstaller
 *.manifest
 *.spec
@@ -69,6 +70,7 @@ venv.bak/
 # Databricks
 .databricks/
 .databricksconnect
+.claude/
 
 # mypy
 .mypy_cache/

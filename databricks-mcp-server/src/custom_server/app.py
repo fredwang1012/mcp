@@ -1,5 +1,5 @@
 import time
-print("🚀 Unity Catalog MCP Server - VERSION 7.5 SQL-ONLY")
+print("🚀 Unity Catalog MCP Server - VERSION 7.6 SQL-ONLY")
 print("✅ All tools now use SQL instead of SDK calls!")
 print("✅ Fixed authentication mismatch with Databricks Apps!")
 print(f"🕒 Server starting at {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -8,6 +8,13 @@ print("📍 File path: src/custom_server/app.py")
 import asyncio
 import json
 import os
+
+# Clear OAuth environment variables to prevent conflicts with token-based auth
+oauth_env_vars = ['DATABRICKS_CLIENT_ID', 'DATABRICKS_CLIENT_SECRET']
+for var in oauth_env_vars:
+    if var in os.environ:
+        print(f"🔧 Clearing OAuth env var: {var}")
+        del os.environ[var]
 from typing import Any, Dict, List
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -47,19 +54,26 @@ class TokenManager:
         
     def update_token_from_request(self, request):
         """Update token from request headers"""
+        print(f"🔍 Checking headers for token...")
+        
         # Try Authorization header first
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
+            print(f"✅ Found token in Authorization header: {token[:50]}...")
             self.set_token(token)
             return True
             
         # Try x-forwarded-access-token header
         forwarded_token = request.headers.get("x-forwarded-access-token", "")
         if forwarded_token and forwarded_token != "not found":
+            print(f"✅ Found token in X-Forwarded-Access-Token header: {forwarded_token[:50]}...")
             self.set_token(forwarded_token)
             return True
-            
+        
+        print(f"❌ No token found in headers")
+        print(f"   Authorization: {auth_header[:50] if auth_header else 'None'}")
+        print(f"   X-Forwarded-Access-Token: {forwarded_token[:50] if forwarded_token else 'None'}")
         return False
         
     def set_token(self, token):
@@ -142,10 +156,20 @@ token_manager = TokenManager()
 # DATABRICKS CLIENT
 # =============================================
 
-def get_databricks_client():
+def get_databricks_client(token=None):
     """Get authenticated Databricks client"""
     try:
-        client = WorkspaceClient()
+        if token:
+            # Use provided token for authentication - clear OAuth env vars to avoid conflicts
+            client = WorkspaceClient(
+                host=DATABRICKS_HOST,
+                token=token,
+                client_id=None,  # Explicitly clear OAuth credentials
+                client_secret=None
+            )
+        else:
+            # Fall back to default authentication
+            client = WorkspaceClient()
         return client
     except Exception as e:
         print(f"❌ Error initializing Databricks client: {e}")
@@ -296,8 +320,17 @@ async def list_tools() -> List[Tool]:
 async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
     """Handle tool calls using SQL for everything"""
     try:
-        client = get_databricks_client()
+        # Debug logging
+        print(f"🔍 call_tool invoked: {name}")
+        print(f"🔍 Token available: {token_manager.current_token is not None}")
+        if token_manager.current_token:
+            print(f"🔍 Token length: {len(token_manager.current_token)}")
+            print(f"🔍 Token prefix: {token_manager.current_token[:50]}...")
+        
+        # Get client with current token from token_manager
+        client = get_databricks_client(token=token_manager.current_token)
         if not client:
+            print(f"❌ Failed to create client. Token: {token_manager.current_token is not None}")
             return CallToolResult(
                 content=[TextContent(type="text", text="❌ Error: Unable to connect to Databricks")]
             )
@@ -1144,6 +1177,9 @@ async def debug_mcp():
 async def mcp_endpoint(request: Request):
     """MCP endpoint using official SDK"""
     try:
+        # Update token from request headers
+        token_manager.update_token_from_request(request)
+        
         # Get the request body
         body = await request.body()
         

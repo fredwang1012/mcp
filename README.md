@@ -1,57 +1,136 @@
-# Databricks Unity Catalog MCP Server
+# Databricks MCP Server for Claude Desktop
 
-A Model Context Protocol (MCP) server that enables LLMs to query Unity Catalog on Databricks with user-specific permissions.
+This project provides a Model Context Protocol (MCP) server that connects Claude Desktop to Databricks Unity Catalog, allowing you to query databases, list catalogs, tables, and schemas directly from Claude.
 
-## Overview
+## Architecture
 
-This MCP server is deployed on Databricks Apps and provides:
-- **SQL Query Execution**: Execute SQL queries against Unity Catalog
-- **Table Discovery**: List available catalogs, schemas, and tables based on user permissions
-- **Authentication**: Integrates with Databricks authentication to respect user privileges
+The setup consists of three main components:
 
-## Deployment
+1. **Claude Desktop** - The AI assistant interface
+2. **MCP Client** (`databricks_mcp_client.js`) - Bridge between Claude and Databricks Apps
+3. **MCP Server** (`databricks-mcp-server/`) - FastAPI server deployed on Databricks Apps
 
-The server is deployed at: https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com
+## Prerequisites
 
-## Features
+- Claude Desktop installed
+- Databricks workspace access
+- Databricks CLI configured
+- Node.js installed
+- Access to Databricks Apps
 
-- `execute_sql_query` tool - Run SQL queries against Unity Catalog
-- `unity-catalog://tables` resource - Discover available tables and views
-- Automatic authentication via Databricks Apps
-- Permission-based access control
+## Setup Instructions
 
-## Usage with Claude Desktop/Cline
+### 1. Configure Databricks CLI
 
-Configure in your MCP settings:
+```bash
+databricks configure
+```
+
+Set your workspace host and token:
+- Host: `https://your-workspace.databricks.com`
+- Token: Your personal access token
+
+### 2. Deploy the MCP Server
+
+```bash
+cd databricks-mcp-server
+databricks sync . //Workspace/Users/your-email@domain.com/databricks-mcp-server --full
+databricks apps deploy databricks-mcp-server
+```
+
+### 3. Download MCP Client
+
+1. Visit your deployed app URL: `https://your-app.databricksapps.com`
+2. Click the **"Download Client"** button to get `databricks_mcp_client.js`
+3. Save the file to a folder like `C:\Users\YourName\mcp\`
+
+### 4. Get Authentication Token
+
+1. Visit the app dashboard page: `https://your-app.databricksapps.com/`
+2. Copy the JWT token from the configuration display
+3. Note: Tokens expire every hour and need refreshing
+
+### 5. Configure Claude Desktop
+
+Update your Claude Desktop configuration file:
+
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+**Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
-    "databricks-unity-catalog": {
-      "command": "npx",
-      "args": ["@modelcontextprotocol/server-http-client", 
-               "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/mcp"],
+    "unity-catalog": {
+      "command": "node",
+      "args": ["C:\\Users\\YourName\\mcp\\databricks_mcp_client.js"],
       "env": {
-        "AUTH_TYPE": "oauth2"
+        "BEARER_TOKEN": "your-jwt-token-from-step-4"
       }
     }
   }
 }
 ```
 
-## Development
+### 6. Restart Claude Desktop
 
-The server code is in the `databricks-mcp-server/` directory.
+Close and reopen Claude Desktop to load the new configuration.
 
-To deploy updates:
+## Usage
+
+Once configured, you can ask Claude to:
+
+- List all catalogs: "Show me all available catalogs"
+- List schemas: "What schemas are in the main catalog?"
+- List tables: "Show me tables in the default schema"
+- Query data: "Get the first 10 rows from table_name"
+- Explore data structure: "Describe the schema of table_name"
+
+## Troubleshooting
+
+### Token Expiration
+If you get authentication errors, refresh your JWT token:
+1. Visit your app URL in browser
+2. Extract fresh token from cookies
+3. Update `claude_desktop_config.json`
+4. Restart Claude Desktop
+
+### Connection Issues
+Check the Claude Desktop logs at `%APPDATA%\Claude\logs\`:
+- `mcp-server-unity-catalog.log` - MCP server connection logs
+- `mcp.log` - General MCP logs
+
+### Server Logs
+Monitor Databricks Apps logs:
 ```bash
-databricks sync databricks-mcp-server "/Users/frederick.wang@bci.ca/databricks-mcp-server"
-databricks apps deploy databricks-mcp-server --source-code-path "/Workspace/Users/frederick.wang@bci.ca/databricks-mcp-server"
+databricks apps list-deployments your-app-name
 ```
 
-## Architecture
+## Files Structure
 
-- Built with FastAPI and FastMCP
-- Deployed on Databricks Apps
-- Uses Databricks SDK for Unity Catalog access
-- Implements MCP protocol for LLM integration
+```
+mcp/
+├── databricks_mcp_client.js     # MCP client (bridge)
+├── databricks-mcp-server/       # Main server code
+│   ├── src/custom_server/
+│   │   ├── app.py              # FastAPI MCP server
+│   │   └── main.py             # Entry point
+│   ├── databricks.yml          # Deployment config
+│   └── requirements.txt        # Python dependencies
+└── README.md                    # This file
+```
+
+## Authentication Flow
+
+1. Claude Desktop → MCP Client (via stdio)
+2. MCP Client → Databricks Apps (HTTP with Bearer token)
+3. Databricks Apps → Unity Catalog APIs (authenticated requests)
+4. Results flow back through the chain to Claude
+
+## Security Notes
+
+- **User Isolation**: The server uses Databricks Apps' `x-forwarded-access-token` header to authenticate users
+- **Permission Enforcement**: Users can only access Unity Catalog resources they have permissions for
+- **Token Security**: JWT tokens expire every hour and need refreshing
+- **No Credential Storage**: Never commit tokens to version control
+- **Environment Variables**: Use environment variables for sensitive configuration
+- **Access Control**: The MCP server enforces the same permissions as your Databricks workspace access

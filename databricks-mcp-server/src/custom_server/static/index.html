@@ -4,12 +4,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unity Catalog SQL MCP Server on Databricks Apps</title>
+    <title>Databricks MCP Server - Setup Guide</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Highlight.js CSS and JS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', (event) => {
             hljs.highlightAll();
@@ -20,8 +20,8 @@
 <body class="bg-gray-900 text-gray-100 font-sans">
 
     <!-- Hero Section -->
-    <div class="py-12 sm:py-16 h-screen flex items-center justify-center">
-        <div class="max-w-3xl mx-auto px-4 text-center">
+    <div class="py-12 sm:py-16 min-h-screen flex items-center justify-center">
+        <div class="max-w-4xl mx-auto px-4 text-center">
             <!-- Logos Placeholder -->
             <div class="flex justify-center items-center gap-8 mb-8">
                 <!-- Databricks Logo -->
@@ -34,18 +34,21 @@
                     <img src="https://avatars.githubusercontent.com/u/182288589?s=200&v=4" alt="MCP Logo"
                         class="w-20 h-20 rounded-full">
                 </div>
-
             </div>
             <h1 class="text-4xl font-bold text-white sm:text-5xl text-balance">
-                Unity Catalog SQL MCP Server on Databricks Apps
+                Databricks MCP Server for Claude Desktop
             </h1>
             <p class="mt-6 text-xl text-gray-300">
-                Your Unity Catalog SQL MCP server is up and running on Databricks Apps.
+                Connect Claude Desktop to your Databricks Unity Catalog with natural language queries.
             </p>
-            <div class="mt-10">
-                <a href="#connect"
+            <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
+                <a href="#setup"
                     class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
-                    Get Started
+                    Setup Guide
+                </a>
+                <a href="#download"
+                    class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-green-600 hover:bg-green-700">
+                    Download Client
                 </a>
             </div>
         </div>
@@ -109,70 +112,140 @@
         </div>
     </div>
 
-    <!-- Connection Section -->
-    <div id="connect" class="py-12">
+    <!-- Download Section -->
+    <div id="download" class="py-12 bg-gray-800">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h2 class="text-2xl font-bold text-center text-white">Connect to the Server</h2>
-            <div class="mt-10 bg-gray-800 shadow overflow-hidden sm:rounded-lg">
+            <h2 class="text-2xl font-bold text-center text-white mb-8">📥 Download MCP Client</h2>
+            <div class="bg-gray-900 shadow overflow-hidden sm:rounded-lg">
                 <div class="px-4 py-5 sm:px-6">
-                    <h3 class="text-lg leading-6 font-medium text-white">Connection Details</h3>
+                    <h3 class="text-lg leading-6 font-medium text-white">MCP Client Bridge</h3>
+                    <p class="mt-1 max-w-2xl text-sm text-gray-400">Download the Node.js client that connects Claude Desktop to your Databricks MCP server.</p>
                 </div>
                 <div class="border-t border-gray-700 px-4 py-5 sm:p-6">
-                    <dl class="grid grid-cols-1 gap-x-4 gap-y-8 sm:grid-cols-2">
-                        <div class="sm:col-span-1">
-                            <dt class="text-sm font-medium text-gray-400">
-                                MCP Endpoint
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-100">
-                                <code
-                                    class="bg-gray-900 px-2 py-1 rounded">https://your.app.url.databricksapps.com/mcp</code>
-                            </dd>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h4 class="text-lg font-medium text-white">databricks_mcp_client.js</h4>
+                            <p class="text-sm text-gray-400">Bridge between Claude Desktop and Databricks Apps</p>
                         </div>
-                        <div class="sm:col-span-1">
-                            <dt class="text-sm font-medium text-gray-400">
-                                Transport <Table></Table>
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-100">
-                                <code class="bg-gray-900 px-2 py-1 rounded">
-                                    Streamable HTTP
-                                </code>
-                            </dd>
+                        <a href="/download-client" download="databricks_mcp_client.js"
+                            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            Download Client
+                        </a>
+                    </div>
+                    <div class="mt-4 p-4 bg-blue-900 bg-opacity-20 rounded-lg">
+                        <p class="text-sm text-blue-300">
+                            <strong>Note:</strong> You'll need Node.js installed on your system to run the client.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Setup Section -->
+    <div id="setup" class="py-12">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-2xl font-bold text-center text-white mb-8">🚀 Setup Instructions</h2>
+            
+            <!-- Step 1: Download -->
+            <div class="mb-8 bg-gray-800 shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-white flex items-center">
+                        <span class="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">1</span>
+                        Download MCP Client
+                    </h3>
+                </div>
+                <div class="border-t border-gray-700 px-4 py-5 sm:p-6">
+                    <p class="text-gray-300 mb-4">Download the MCP client and save it to a folder on your computer:</p>
+                    <code class="bg-gray-900 px-3 py-2 rounded block text-sm text-gray-100">C:\Users\YourName\mcp\databricks_mcp_client.js</code>
+                </div>
+            </div>
+
+            <!-- Step 2: Get Token -->
+            <div class="mb-8 bg-gray-800 shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-white flex items-center">
+                        <span class="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">2</span>
+                        Get Your Authentication Token
+                    </h3>
+                </div>
+                <div class="border-t border-gray-700 px-4 py-5 sm:p-6">
+                    <div class="space-y-4">
+                        <p class="text-gray-300">Visit the <a href="/" class="text-blue-400 hover:text-blue-300">dashboard page</a> to get your current JWT token.</p>
+                        <div class="p-4 bg-yellow-900 bg-opacity-20 rounded-lg">
+                            <p class="text-sm text-yellow-300">
+                                <strong>Important:</strong> Tokens expire every hour. You'll need to refresh them periodically.
+                            </p>
                         </div>
-                        <div class="sm:col-span-2">
-                            <dt class="text-sm font-medium text-gray-400">
-                                Example Claude Desktop Configuration
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-100">
-                                <pre class="bg-gray-900 p-3 rounded overflow-x-auto">
-<code class="language-json">
-{
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Configure Claude -->
+            <div class="mb-8 bg-gray-800 shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-white flex items-center">
+                        <span class="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">3</span>
+                        Configure Claude Desktop
+                    </h3>
+                </div>
+                <div class="border-t border-gray-700 px-4 py-5 sm:p-6">
+                    <p class="text-gray-300 mb-4">Update your Claude Desktop configuration file:</p>
+                    <p class="text-sm text-gray-400 mb-2">Windows: <code class="bg-gray-900 px-2 py-1 rounded">%APPDATA%\Claude\claude_desktop_config.json</code></p>
+                    <p class="text-sm text-gray-400 mb-4">Mac: <code class="bg-gray-900 px-2 py-1 rounded">~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
+                    <pre class="bg-gray-900 p-4 rounded overflow-x-auto">
+<code class="language-json">{
   "mcpServers": {
-    "databricks-unity-catalog": {
-      "url": "https://your.app.url.databricksapps.com/mcp",
-      "transport": "sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_DATABRICKS_TOKEN"
+    "unity-catalog": {
+      "command": "node",
+      "args": ["C:\\path\\to\\your\\databricks_mcp_client.js"],
+      "env": {
+        "BEARER_TOKEN": "your-jwt-token-from-step-2"
       }
     }
   }
-}
-</code>
-                                </pre>
-                                <p class="mt-2 text-xs text-gray-400">
-                                    Get your token from the Databricks workspace settings or use the CLI: <code class="bg-gray-900 px-1 py-0.5 rounded">databricks auth token</code>
-                                </p>
-                            </dd>
+}</code>
+                    </pre>
+                </div>
+            </div>
+
+            <!-- Step 4: Restart -->
+            <div class="mb-8 bg-gray-800 shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-white flex items-center">
+                        <span class="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">4</span>
+                        Restart Claude Desktop
+                    </h3>
+                </div>
+                <div class="border-t border-gray-700 px-4 py-5 sm:p-6">
+                    <p class="text-gray-300">Close and reopen Claude Desktop to load the new MCP server configuration.</p>
+                </div>
+            </div>
+
+            <!-- Usage Examples -->
+            <div class="bg-gray-800 shadow overflow-hidden sm:rounded-lg">
+                <div class="px-4 py-5 sm:px-6">
+                    <h3 class="text-lg leading-6 font-medium text-white">✨ Usage Examples</h3>
+                    <p class="mt-1 text-sm text-gray-400">Try these natural language queries in Claude:</p>
+                </div>
+                <div class="border-t border-gray-700 px-4 py-5 sm:p-6">
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div class="p-3 bg-gray-900 rounded">
+                            <p class="text-sm font-medium text-gray-300">"Show me all available catalogs"</p>
                         </div>
-                        <div class="sm:col-span-2">
-                            <dt class="text-sm font-medium text-gray-400">
-                                Or use your favourite tool
-                            </dt>
-                            <dd class="mt-1 text-sm text-gray-100">
-                                You can also connect using tools like <strong>Claude</strong>, <strong>MCP
-                                    Inspector</strong>, or any other compatible client.
-                            </dd>
+                        <div class="p-3 bg-gray-900 rounded">
+                            <p class="text-sm font-medium text-gray-300">"List tables in the main catalog"</p>
                         </div>
-                    </dl>
+                        <div class="p-3 bg-gray-900 rounded">
+                            <p class="text-sm font-medium text-gray-300">"Get first 10 rows from table_name"</p>
+                        </div>
+                        <div class="p-3 bg-gray-900 rounded">
+                            <p class="text-sm font-medium text-gray-300">"Describe the schema of table_name"</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
