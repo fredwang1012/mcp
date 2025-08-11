@@ -1,5 +1,5 @@
 import time
-print("🚀 Unity Catalog MCP Server - VERSION 7.6 SQL-ONLY")
+print("🚀 Unity Catalog MCP Server - VERSION 7.7 SQL-ONLY")
 print("✅ All tools now use SQL instead of SDK calls!")
 print("✅ Fixed authentication mismatch with Databricks Apps!")
 print(f"🕒 Server starting at {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -140,8 +140,10 @@ class TokenManager:
         return {
             "mcpServers": {
                 "unity-catalog": {
-                    "command": "npx",
-                    "args": ["@modelcontextprotocol/server-fetch", "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/mcp"],
+                    "command": "node",
+                    "args": [
+                        "C:\\\\path\\\\to\\\\your\\\\databricks_mcp_client.js"
+                    ],
                     "env": {
                         "BEARER_TOKEN": self.current_token
                     }
@@ -534,7 +536,7 @@ print("✅ MCP tools registered successfully!")
 app = FastAPI(
     title="Unity Catalog MCP Server",
     description="MCP server for Unity Catalog integration using SQL only",
-    version="7.5",
+    version="7.7",
     redirect_slashes=False
 )
 
@@ -857,7 +859,7 @@ async def dashboard(request: Request):
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Unity Catalog MCP Dashboard <span class="version-badge">v7.5 SQL-Only</span></h1>
+            <h1>🚀 Unity Catalog MCP Dashboard <span class="version-badge">v7.7 SQL-Only</span></h1>
             <p>Token Management & Claude Desktop Configuration</p>
         </div>
         
@@ -1117,7 +1119,7 @@ async def dashboard_data(request: Request):
         "status": status,
         "config": config,
         "server_info": {
-            "version": "7.5",
+            "version": "7.7",
             "name": "unity-catalog-mcp",
             "tools_count": 6,
             "endpoint": "/mcp",
@@ -1135,7 +1137,7 @@ async def health_check():
     return {
         "status": "healthy", 
         "service": "Unity Catalog MCP Server",
-        "version": "7.5",
+        "version": "7.7",
         "approach": "sql_only",
         "endpoint": "/mcp"
     }
@@ -1162,7 +1164,7 @@ async def debug_mcp():
     return {
         "message": "MCP server info",
         "server_name": "unity-catalog-mcp",
-        "version": "7.5",
+        "version": "7.7",
         "approach": "sql_only",
         "tools_count": 6,
         "endpoint": "/mcp",
@@ -1205,7 +1207,7 @@ async def mcp_endpoint(request: Request):
                     "protocolVersion": "2024-11-05",
                     "serverInfo": {
                         "name": "unity-catalog-mcp",
-                        "version": "7.5"
+                        "version": "7.7"
                     },
                     "capabilities": {
                         "tools": {}
@@ -1285,7 +1287,7 @@ async def mcp_get():
             "message": "MCP endpoint",
             "method": "POST required",
             "server": "unity-catalog-mcp",
-            "version": "7.5",
+            "version": "7.7",
             "approach": "sql_only"
         }
     )
@@ -1294,7 +1296,7 @@ async def mcp_get():
 # STARTUP
 # =============================================
 
-print("✅ Beautiful dashboard updated to v7.5 SQL-Only!")
+print("✅ Beautiful dashboard updated to v7.7 SQL-Only!")
 print("✅ Token management with live countdown timer!")
 print("✅ One-click copy for token and Claude Desktop config!")
 print("✅ MCP endpoint configured at /mcp")
