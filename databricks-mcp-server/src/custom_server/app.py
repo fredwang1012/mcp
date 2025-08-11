@@ -760,6 +760,16 @@ async def dashboard(request: Request):
             background: #c82333;
         }}
         
+        .btn-primary {{
+            background: #007bff;
+            padding: 5px 15px;
+            font-size: 0.9rem;
+        }}
+        
+        .btn-primary:hover {{
+            background: #0056b3;
+        }}
+        
         .btn-grid {{
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -916,9 +926,10 @@ async def dashboard(request: Request):
                 <div class="instructions">
                     <h3>📝 Setup Instructions:</h3>
                     <ol>
-                        <li>Copy the configuration above</li>
-                        <li>Open Claude Desktop settings.json</li>
-                        <li>Replace the content with the copied configuration</li>
+                        <li>Download the MCP client: <button class="btn btn-primary" style="margin-left: 10px;" onclick="window.location.href='/download/client'">💾 Download Client</button></li>
+                        <li>Save it to a folder (e.g., C:\\Users\\YourName\\mcp\\)</li>
+                        <li>Update the path in the configuration above</li>
+                        <li>Copy the configuration to Claude Desktop settings.json</li>
                         <li>Restart Claude Desktop</li>
                     </ol>
                 </div>
@@ -1141,6 +1152,119 @@ async def health_check():
         "approach": "sql_only",
         "endpoint": "/mcp"
     }
+
+@app.get("/download/client")
+async def download_client():
+    """Download the MCP client JavaScript file"""
+    client_js_content = '''#!/usr/bin/env node
+
+const readline = require('readline');
+const https = require('https');
+
+// Configuration
+const SERVER_URL = 'https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/mcp';
+const TOKEN = process.env.BEARER_TOKEN;
+
+if (!TOKEN) {
+  console.error('Error: BEARER_TOKEN environment variable is required');
+  process.exit(1);
+}
+
+// Create interfaces for stdio
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  terminal: false
+});
+
+// Handle incoming requests from Claude
+rl.on('line', async (line) => {
+  try {
+    const request = JSON.parse(line);
+    
+    // Make HTTPS request to Databricks Apps
+    const response = await makeHttpsRequest(request);
+    
+    // Send response back to Claude
+    console.log(JSON.stringify(response));
+  } catch (error) {
+    console.error(JSON.stringify({
+      jsonrpc: "2.0",
+      error: {
+        code: -32603,
+        message: error.message
+      },
+      id: null
+    }));
+  }
+});
+
+function makeHttpsRequest(requestBody) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify(requestBody);
+    
+    const url = new URL(SERVER_URL);
+    const options = {
+      hostname: url.hostname,
+      port: 443,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        if (!data || data.trim() === '') {
+          reject(new Error('Empty response from server'));
+          return;
+        }
+        
+        try {
+          const response = JSON.parse(data);
+          resolve(response);
+        } catch (e) {
+          reject(new Error(`Invalid JSON response: ${data}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      reject(err);
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
+
+// Handle process termination
+process.on('SIGINT', () => {
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  process.exit(0);
+});
+'''
+    
+    from fastapi.responses import Response
+    return Response(
+        content=client_js_content,
+        media_type="application/javascript",
+        headers={
+            "Content-Disposition": "attachment; filename=databricks_mcp_client.js"
+        }
+    )
 
 @app.get("/debug-headers")
 async def debug_headers(request: Request):

@@ -38,19 +38,21 @@ databricks sync . //Workspace/Users/your-email@domain.com/databricks-mcp-server 
 databricks apps deploy databricks-mcp-server
 ```
 
-### 3. Download MCP Client
+### 3. Get MCP Client and Configure Claude Desktop
 
-1. Visit your deployed app URL: `https://your-app.databricksapps.com`
-2. Click the **"Download Client"** button to get `databricks_mcp_client.js`
-3. Save the file to a folder like `C:\Users\YourName\mcp\`
+1. Visit your deployed app dashboard: `https://your-app.databricksapps.com`
+2. Click the **"💾 Download Client"** button to download `databricks_mcp_client.js`
+3. Save the file to a permanent location, for example:
+   - Windows: `C:\Users\YourName\mcp\databricks_mcp_client.js`
+   - Mac: `~/mcp/databricks_mcp_client.js`
+   - Linux: `~/mcp/databricks_mcp_client.js`
+4. The dashboard will show your Claude Desktop configuration with:
+   - The correct file path format for your OS
+   - Your current authentication token (auto-refreshed)
+5. Click **"📋 Copy Configuration"** to copy the entire config
+6. Note: Tokens expire every hour - revisit the dashboard to get a fresh token
 
-### 4. Get Authentication Token
-
-1. Visit the app dashboard page: `https://your-app.databricksapps.com/`
-2. Copy the JWT token from the configuration display
-3. Note: Tokens expire every hour and need refreshing
-
-### 5. Configure Claude Desktop
+### 4. Configure Claude Desktop
 
 Update your Claude Desktop configuration file:
 
@@ -62,16 +64,18 @@ Update your Claude Desktop configuration file:
   "mcpServers": {
     "unity-catalog": {
       "command": "node",
-      "args": ["C:\\Users\\YourName\\mcp\\databricks_mcp_client.js"],
+      "args": ["C:\\path\\to\\your\\databricks_mcp_client.js"],
       "env": {
-        "BEARER_TOKEN": "your-jwt-token-from-step-4"
+        "BEARER_TOKEN": "your-jwt-token-from-dashboard"
       }
     }
   }
 }
 ```
 
-### 6. Restart Claude Desktop
+Replace `C:\\path\\to\\your\\databricks_mcp_client.js` with the actual path where you saved the file.
+
+### 5. Restart Claude Desktop
 
 Close and reopen Claude Desktop to load the new configuration.
 
