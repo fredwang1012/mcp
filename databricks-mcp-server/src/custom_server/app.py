@@ -1,7 +1,8 @@
 import time
-print("🚀 Unity Catalog MCP Server - VERSION 7.7 SQL-ONLY")
+print("🚀 Unity Catalog MCP Server - VERSION 7.7 SQL+OBO")
 print("✅ All tools now use SQL instead of SDK calls!")
-print("✅ Fixed authentication mismatch with Databricks Apps!")
+print("✅ On-Behalf-Of (OBO) authentication enabled!")
+print("✅ Operations execute with user permissions!")
 print(f"🕒 Server starting at {time.strftime('%Y-%m-%d %H:%M:%S')}")
 print("📍 File path: src/custom_server/app.py")
 
@@ -160,23 +161,38 @@ token_manager = TokenManager()
 # =============================================
 
 def get_databricks_client(token=None):
-    """Get authenticated Databricks client"""
+    """Get authenticated Databricks client with OBO support
+    
+    Uses On-Behalf-Of authentication when token is provided, allowing
+    operations to execute with the user's permissions rather than
+    the app's service principal permissions.
+    """
     try:
         if token:
-            # Use provided token for authentication - clear OAuth env vars to avoid conflicts
+            # Use OBO authentication with user's OAuth token
+            # CRITICAL: auth_type="pat" is required for OBO per Databricks documentation
             client = WorkspaceClient(
                 host=DATABRICKS_HOST,
                 token=token,
-                client_id=None,  # Explicitly clear OAuth credentials
-                client_secret=None
+                auth_type="pat"  # Required for OBO authentication
             )
         else:
             # Fall back to default authentication
             client = WorkspaceClient()
         return client
     except Exception as e:
-        print(f"Error initializing Databricks client: {e}")
+        print(f"❌ Error initializing Databricks client: {e}")
         return None
+
+def validate_obo_user(client):
+    """Validate OBO authentication by getting current user info"""
+    try:
+        current_user = client.current_user.me()
+        print(f"✅ OBO authenticated as: {current_user.user_name} ({current_user.display_name})")
+        return True, current_user.user_name
+    except Exception as e:
+        print(f"⚠️ Could not validate OBO user: {e}")
+        return False, None
 
 # =============================================
 # SQL EXECUTION HELPER
@@ -347,6 +363,16 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
             return CallToolResult(
                 content=[TextContent(type="text", text="Error: Unable to connect to Databricks")]
             )
+        
+        # Validate OBO authentication (optional - helps verify it's working)
+        if token_manager.current_token:
+            is_obo, username = validate_obo_user(client)
+            if is_obo:
+                print(f"🎯 Executing '{name}' as user: {username}")
+            else:
+                print(f"⚠️ OBO validation failed, continuing with service principal")
+        else:
+            print(f"📝 No user token - using service principal authentication")
         
         if name == "query_sql":
             query = arguments.get("query", "")
