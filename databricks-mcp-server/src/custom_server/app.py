@@ -907,7 +907,7 @@ async def dashboard(request: Request):
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 Unity Catalog MCP Dashboard <span class="version-badge">v7.7 SQL-Only</span></h1>
+            <h1>🚀 Unity Catalog MCP Dashboard <span class="version-badge">v7.7 SQL+OBO</span></h1>
             <p>Token Management & Claude Desktop Configuration</p>
         </div>
         
@@ -1017,7 +1017,7 @@ async def dashboard(request: Request):
                 </div>
                 
                 <div class="instructions">
-                    <h3>🚀 Available Tools (SQL-Only):</h3>
+                    <h3>🚀 Available Tools (SQL+OBO):</h3>
                     <ul>
                         <li>📊 Query SQL databases</li>
                         <li>📁 List catalogs and schemas</li>
@@ -1184,7 +1184,7 @@ async def dashboard_data(request: Request):
             "name": "unity-catalog-mcp",
             "tools_count": 6,
             "endpoint": "/mcp",
-            "approach": "sql_only"
+            "approach": "sql_with_obo"
         }
     }
 
@@ -1199,7 +1199,7 @@ async def health_check():
         "status": "healthy", 
         "service": "Unity Catalog MCP Server",
         "version": "7.7",
-        "approach": "sql_only",
+        "approach": "sql_with_obo",
         "endpoint": "/mcp"
     }
 
@@ -1511,7 +1511,7 @@ async def debug_mcp():
         "message": "MCP server info",
         "server_name": "unity-catalog-mcp",
         "version": "7.7",
-        "approach": "sql_only",
+        "approach": "sql_with_obo",
         "tools_count": 6,
         "endpoint": "/mcp",
         "ready": True
@@ -1656,7 +1656,7 @@ async def mcp_get():
             "method": "POST required",
             "server": "unity-catalog-mcp",
             "version": "7.7",
-            "approach": "sql_only"
+            "approach": "sql_with_obo"
         }
     )
 
@@ -1664,7 +1664,7 @@ async def mcp_get():
 # STARTUP
 # =============================================
 
-print("✅ Beautiful dashboard updated to v7.7 SQL-Only!")
+print("✅ Beautiful dashboard updated to v7.7 SQL+OBO!")
 print("✅ Token management with live countdown timer!")
 print("✅ One-click copy for token and Claude Desktop config!")
 print("✅ MCP endpoint configured at /mcp")
