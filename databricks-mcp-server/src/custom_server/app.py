@@ -60,14 +60,14 @@ class TokenManager:
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            print(f"✅ Found token in Authorization header: {token[:50]}...")
+            print(f"Found token in Authorization header: {token[:50]}...")
             self.set_token(token)
             return True
             
         # Try x-forwarded-access-token header
         forwarded_token = request.headers.get("x-forwarded-access-token", "")
         if forwarded_token and forwarded_token != "not found":
-            print(f"✅ Found token in X-Forwarded-Access-Token header: {forwarded_token[:50]}...")
+            print(f"Found token in X-Forwarded-Access-Token header: {forwarded_token[:50]}...")
             self.set_token(forwarded_token)
             return True
         
@@ -91,7 +91,7 @@ class TokenManager:
             self.token_expiry = utc_expiry.astimezone(self.pst)
             print(f"🔍 Token expires at: {self.token_expiry} PST (UTC: {utc_expiry})")
         except Exception as e:
-            print(f"❌ Error decoding token: {e}")
+            print(f"Error decoding token: {e}")
             self.token_expiry = None
             
     def get_status(self):
@@ -174,7 +174,7 @@ def get_databricks_client(token=None):
             client = WorkspaceClient()
         return client
     except Exception as e:
-        print(f"❌ Error initializing Databricks client: {e}")
+        print(f"Error initializing Databricks client: {e}")
         return None
 
 # =============================================
@@ -318,6 +318,16 @@ async def list_tools() -> List[Tool]:
         )
     ]
 
+@server.list_resources()
+async def list_resources():
+    """List available resources (empty for now)"""
+    return []
+
+@server.list_prompts()
+async def list_prompts():
+    """List available prompts (empty for now)"""
+    return []
+
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
     """Handle tool calls using SQL for everything"""
@@ -334,24 +344,24 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
         if not client:
             print(f"❌ Failed to create client. Token: {token_manager.current_token is not None}")
             return CallToolResult(
-                content=[TextContent(type="text", text="❌ Error: Unable to connect to Databricks")]
+                content=[TextContent(type="text", text="Error: Unable to connect to Databricks")]
             )
         
         if name == "query_sql":
             query = arguments.get("query", "")
             if not query:
                 return CallToolResult(
-                    content=[TextContent(type="text", text="❌ Error: query is required")]
+                    content=[TextContent(type="text", text="Error: query is required")]
                 )
             
             try:
                 results = execute_sql_query(client, query)
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"✅ Query executed successfully. Results: {json.dumps(results, indent=2)}")]
+                    content=[TextContent(type="text", text=f"Query executed successfully. Results: {json.dumps(results, indent=2)}")]
                 )
             except Exception as e:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"❌ SQL execution failed: {str(e)}")]
+                    content=[TextContent(type="text", text=f"SQL execution failed: {str(e)}")]
                 )
         
         elif name == "list_catalogs":
@@ -360,18 +370,18 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                 results = execute_sql_query(client, "SHOW CATALOGS")
                 catalog_names = [row[0] for row in results]  # First column contains catalog names
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"✅ Available catalogs: {json.dumps(catalog_names, indent=2)}")]
+                    content=[TextContent(type="text", text=f"Available catalogs: {json.dumps(catalog_names, indent=2)}")]
                 )
             except Exception as e:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"❌ Error listing catalogs: {str(e)}")]
+                    content=[TextContent(type="text", text=f"Error listing catalogs: {str(e)}")]
                 )
         
         elif name == "list_schemas":
             catalog_name = arguments.get("catalog_name", "")
             if not catalog_name:
                 return CallToolResult(
-                    content=[TextContent(type="text", text="❌ Error: catalog_name is required")]
+                    content=[TextContent(type="text", text="Error: catalog_name is required")]
                 )
             
             try:
@@ -380,11 +390,11 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                 results = execute_sql_query(client, query)
                 schema_names = [row[0] for row in results]  # First column contains schema names
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"✅ Schemas in catalog '{catalog_name}': {json.dumps(schema_names, indent=2)}")]
+                    content=[TextContent(type="text", text=f"Schemas in catalog '{catalog_name}': {json.dumps(schema_names, indent=2)}")]
                 )
             except Exception as e:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"❌ Error listing schemas: {str(e)}")]
+                    content=[TextContent(type="text", text=f"Error listing schemas: {str(e)}")]
                 )
         
         elif name == "list_tables":
@@ -393,20 +403,21 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
             
             if not catalog_name or not schema_name:
                 return CallToolResult(
-                    content=[TextContent(type="text", text="❌ Error: catalog_name and schema_name are required")]
+                    content=[TextContent(type="text", text="Error: catalog_name and schema_name are required")]
                 )
             
             try:
                 # Use SQL instead of SDK
                 query = f"SHOW TABLES IN {catalog_name}.{schema_name}"
                 results = execute_sql_query(client, query)
-                table_names = [row[0] for row in results]  # First column contains table names
+                # SHOW TABLES returns: [schema_name, table_name, is_temporary]
+                table_names = [row[1] if len(row) > 1 else row[0] for row in results]  # Second column contains table names
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"✅ Tables in schema '{catalog_name}.{schema_name}': {json.dumps(table_names, indent=2)}")]
+                    content=[TextContent(type="text", text=f"Tables in schema '{catalog_name}.{schema_name}': {json.dumps(table_names, indent=2)}")]
                 )
             except Exception as e:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"❌ Error listing tables: {str(e)}")]
+                    content=[TextContent(type="text", text=f"Error listing tables: {str(e)}")]
                 )
         
         elif name == "describe_table":
@@ -416,7 +427,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
             
             if not catalog_name or not schema_name or not table_name:
                 return CallToolResult(
-                    content=[TextContent(type="text", text="❌ Error: catalog_name, schema_name, and table_name are required")]
+                    content=[TextContent(type="text", text="Error: catalog_name, schema_name, and table_name are required")]
                 )
             
             try:
@@ -464,11 +475,11 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                     print(f"⚠️ Could not get detailed table info: {detail_error}")
                 
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"✅ Table details: {json.dumps(table_info, indent=2)}")]
+                    content=[TextContent(type="text", text=f"Table details: {json.dumps(table_info, indent=2)}")]
                 )
             except Exception as e:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"❌ Error describing table: {str(e)}")]
+                    content=[TextContent(type="text", text=f"Error describing table: {str(e)}")]
                 )
         
         elif name == "search_tables":
@@ -477,7 +488,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
             
             if not catalog_name or not search_query:
                 return CallToolResult(
-                    content=[TextContent(type="text", text="❌ Error: catalog_name and query are required")]
+                    content=[TextContent(type="text", text="Error: catalog_name and query are required")]
                 )
             
             try:
@@ -510,21 +521,21 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                         continue
                 
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"✅ Found {len(matching_tables)} tables matching '{search_query}': {json.dumps(matching_tables, indent=2)}")]
+                    content=[TextContent(type="text", text=f"Found {len(matching_tables)} tables matching '{search_query}': {json.dumps(matching_tables, indent=2)}")]
                 )
             except Exception as e:
                 return CallToolResult(
-                    content=[TextContent(type="text", text=f"❌ Error searching tables: {str(e)}")]
+                    content=[TextContent(type="text", text=f"Error searching tables: {str(e)}")]
                 )
         
         else:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"❌ Unknown tool: {name}")]
+                content=[TextContent(type="text", text=f"Unknown tool: {name}")]
             )
     
     except Exception as e:
         return CallToolResult(
-            content=[TextContent(type="text", text=f"❌ Error executing tool {name}: {str(e)}")]
+            content=[TextContent(type="text", text=f"Error executing tool {name}: {str(e)}")]
         )
 
 print("✅ MCP tools registered successfully!")
@@ -1376,6 +1387,28 @@ async def mcp_endpoint(request: Request):
                         }
                         for content in result.content
                     ]
+                },
+                "id": request_id
+            }
+            return JSONResponse(response)
+        
+        elif method == "resources/list":
+            # List resources (empty for now)
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "resources": []
+                },
+                "id": request_id
+            }
+            return JSONResponse(response)
+        
+        elif method == "prompts/list":
+            # List prompts (empty for now)
+            response = {
+                "jsonrpc": "2.0",
+                "result": {
+                    "prompts": []
                 },
                 "id": request_id
             }

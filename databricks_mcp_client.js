@@ -76,7 +76,12 @@ rl.on('line', async (input) => {
       throw new Error("Invalid JSON-RPC version");
     }
     
+    // Handle notifications (no ID, no response needed)
     if (typeof requestId === 'undefined') {
+      // Notifications don't need responses
+      if (request.method && request.method.startsWith('notifications/')) {
+        return; // Just ignore notifications
+      }
       throw new Error("Missing request ID");
     }
     
@@ -97,21 +102,20 @@ rl.on('line', async (input) => {
     // Forward request to server
     const response = await makeRequest(request);
     
-    // Ensure the response has the correct JSON-RPC structure
+    // Build a clean JSON-RPC response
     const finalResponse = {
       jsonrpc: "2.0",
-      id: requestId,
-      ...response
+      id: requestId
     };
     
-    // Make sure we don't duplicate the jsonrpc or id fields
-    if (response.jsonrpc) {
-      delete finalResponse.jsonrpc;
-      finalResponse.jsonrpc = "2.0";
-    }
-    if (response.id) {
-      delete finalResponse.id;
-      finalResponse.id = requestId;
+    // Copy either result or error, but not both
+    if (response.result !== undefined) {
+      finalResponse.result = response.result;
+    } else if (response.error !== undefined) {
+      finalResponse.error = response.error;
+    } else {
+      // If neither result nor error, treat entire response as result
+      finalResponse.result = response;
     }
     
     console.log(JSON.stringify(finalResponse));
