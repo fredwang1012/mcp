@@ -140,9 +140,10 @@ class TokenManager:
         return {
             "mcpServers": {
                 "unity-catalog": {
-                    "command": "node",
+                    "command": "powershell",
                     "args": [
-                        "C:\\\\path\\\\to\\\\your\\\\databricks_mcp_client.js"
+                        "-ExecutionPolicy", "Bypass",
+                        "-File", "C:\\\\Users\\\\YourName\\\\Downloads\\\\databricks_mcp_client.ps1"
                     ],
                     "env": {
                         "BEARER_TOKEN": self.current_token
@@ -506,7 +507,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
                         table_results = execute_sql_query(client, tables_query)
                         
                         for table_row in table_results:
-                            table_name = table_row[0]
+                            table_name = table_row[1] if len(table_row) > 1 else table_row[0]
                             # Search for matching table names
                             if search_query.lower() in table_name.lower():
                                 matching_tables.append({
@@ -937,12 +938,24 @@ async def dashboard(request: Request):
                 <div class="instructions">
                     <h3>📝 Setup Instructions:</h3>
                     <ol>
-                        <li>Download the MCP client: <button class="btn btn-primary" style="margin-left: 10px;" onclick="window.location.href='/download/client'">💾 Download Client</button></li>
-                        <li>Save it to a folder (e.g., C:\\Users\\YourName\\mcp\\)</li>
-                        <li>Update the path in the configuration above</li>
+                        <li>Download the PowerShell client: <button class="btn btn-primary" style="margin-left: 10px;" onclick="window.location.href='/download/powershell-client'">💾 Download PowerShell Client</button></li>
+                        <li>Save it to Downloads folder (e.g., C:\\Users\\YourName\\Downloads\\)</li>
                         <li>Copy the configuration to Claude Desktop settings.json</li>
                         <li>Restart Claude Desktop</li>
                     </ol>
+                    
+                    <!-- Alternative Node.js Setup:
+                    If you prefer Node.js, use this configuration instead:
+                    {{
+                      "mcpServers": {{
+                        "unity-catalog": {{
+                          "command": "node",
+                          "args": ["C:\\Users\\YourName\\mcp\\databricks_mcp_client.js"],
+                          "env": {{"BEARER_TOKEN": "your-token-here"}}
+                        }}
+                      }}
+                    }}
+                    -->
                 </div>
             </div>
             
@@ -1164,116 +1177,288 @@ async def health_check():
         "endpoint": "/mcp"
     }
 
-@app.get("/download/client")
-async def download_client():
-    """Download the MCP client JavaScript file"""
-    client_js_content = '''#!/usr/bin/env node
+# @app.get("/download/client")
+# async def download_client():
+#     """Download the MCP client JavaScript file"""
+#     client_js_content = '''#!/usr/bin/env node
+# 
+# const readline = require('readline');
+# const https = require('https');
+# 
+# // Configuration
+# const SERVER_URL = 'https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/mcp';
+# const TOKEN = process.env.BEARER_TOKEN;
+# 
+# if (!TOKEN) {
+#   console.error('Error: BEARER_TOKEN environment variable is required');
+#   process.exit(1);
+# }
+# 
+# // Create interfaces for stdio
+# const rl = readline.createInterface({
+#   input: process.stdin,
+#   output: process.stdout,
+#   terminal: false
+# });
+# 
+# // Handle incoming requests from Claude
+# rl.on('line', async (line) => {
+#   try {
+#     const request = JSON.parse(line);
+#     
+#     // Make HTTPS request to Databricks Apps
+#     const response = await makeHttpsRequest(request);
+#     
+#     // Send response back to Claude
+#     console.log(JSON.stringify(response));
+#   } catch (error) {
+#     console.error(JSON.stringify({
+#       jsonrpc: "2.0",
+#       error: {
+#         code: -32603,
+#         message: error.message
+#       },
+#       id: null
+#     }));
+#   }
+# });
+# 
+# function makeHttpsRequest(requestBody) {
+#   return new Promise((resolve, reject) => {
+#     const postData = JSON.stringify(requestBody);
+#     
+#     const url = new URL(SERVER_URL);
+#     const options = {
+#       hostname: url.hostname,
+#       port: 443,
+#       path: url.pathname,
+#       method: 'POST',
+#       headers: {
+#         'Authorization': `Bearer ${TOKEN}`,
+#         'Content-Type': 'application/json',
+#         'Content-Length': Buffer.byteLength(postData)
+#       }
+#     };
+# 
+#     const req = https.request(options, (res) => {
+#       let data = '';
+#       
+#       res.on('data', (chunk) => {
+#         data += chunk;
+#       });
+#       
+#       res.on('end', () => {
+#         if (!data || data.trim() === '') {
+#           reject(new Error('Empty response from server'));
+#           return;
+#         }
+#         
+#         try {
+#           const response = JSON.parse(data);
+#           resolve(response);
+#         } catch (e) {
+#           reject(new Error(`Invalid JSON response: ${data}`));
+#         }
+#       });
+#     });
+# 
+#     req.on('error', (err) => {
+#       reject(err);
+#     });
+# 
+#     req.write(postData);
+#     req.end();
+#   });
+# }
+# 
+# // Handle process termination
+# process.on('SIGINT', () => {
+#   process.exit(0);
+# });
+# 
+# process.on('SIGTERM', () => {
+#   process.exit(0);
+# });
+# '''
+#     
+#     from fastapi.responses import Response
+#     return Response(
+#         content=client_js_content,
+#         media_type="application/javascript",
+#         headers={
+#             "Content-Disposition": "attachment; filename=databricks_mcp_client.js"
+#         }
+#     )
 
-const readline = require('readline');
-const https = require('https');
+@app.get("/download/powershell-client")
+async def download_powershell_client():
+    """Download the MCP client PowerShell file"""
+    client_ps_content = '''# Databricks MCP Client - PowerShell Version
+# Exact equivalent of the Node.js version, no dependencies required
 
-// Configuration
-const SERVER_URL = 'https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/mcp';
-const TOKEN = process.env.BEARER_TOKEN;
+$SERVER_URL = 'https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/mcp'
+$TOKEN = $env:BEARER_TOKEN
 
-if (!TOKEN) {
-  console.error('Error: BEARER_TOKEN environment variable is required');
-  process.exit(1);
-}
+# Enable TLS 1.2 for HTTPS requests
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
-// Create interfaces for stdio
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  terminal: false
-});
-
-// Handle incoming requests from Claude
-rl.on('line', async (line) => {
-  try {
-    const request = JSON.parse(line);
+function Invoke-MakeRequest {
+    param([object]$RequestBody)
     
-    // Make HTTPS request to Databricks Apps
-    const response = await makeHttpsRequest(request);
-    
-    // Send response back to Claude
-    console.log(JSON.stringify(response));
-  } catch (error) {
-    console.error(JSON.stringify({
-      jsonrpc: "2.0",
-      error: {
-        code: -32603,
-        message: error.message
-      },
-      id: null
-    }));
-  }
-});
-
-function makeHttpsRequest(requestBody) {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify(requestBody);
-    
-    const url = new URL(SERVER_URL);
-    const options = {
-      hostname: url.hostname,
-      port: 443,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${TOKEN}`,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      res.on('end', () => {
-        if (!data || data.trim() === '') {
-          reject(new Error('Empty response from server'));
-          return;
+    try {
+        $postData = $RequestBody | ConvertTo-Json -Depth 10 -Compress
+        $postDataBytes = [System.Text.Encoding]::UTF8.GetBytes($postData)
+        
+        $headers = @{
+            'Authorization' = "Bearer $TOKEN"
+            'Content-Type' = 'application/json'
+            'Content-Length' = $postDataBytes.Length
+            'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0'
         }
         
-        try {
-          const response = JSON.parse(data);
-          resolve(response);
-        } catch (e) {
-          reject(new Error(`Invalid JSON response: ${data}`));
+        $response = Invoke-RestMethod -Uri $SERVER_URL -Method POST -Headers $headers -Body $postData -ContentType 'application/json'
+        return $response
+    }
+    catch {
+        $statusCode = $null
+        $responseBody = ''
+        
+        if ($_.Exception.Response) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+            try {
+                $stream = $_.Exception.Response.GetResponseStream()
+                $reader = New-Object System.IO.StreamReader($stream)
+                $responseBody = $reader.ReadToEnd()
+                $reader.Close()
+                $stream.Close()
+            }
+            catch {
+                $responseBody = $_.Exception.Message
+            }
         }
-      });
-    });
-
-    req.on('error', (err) => {
-      reject(err);
-    });
-
-    req.write(postData);
-    req.end();
-  });
+        
+        if ($statusCode -ne $null) {
+            throw "HTTP $statusCode`: $responseBody"
+        } else {
+            throw $_.Exception.Message
+        }
+    }
 }
 
-// Handle process termination
-process.on('SIGINT', () => {
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  process.exit(0);
-});
+# Main processing loop - read from stdin line by line
+try {
+    while ($true) {
+        $inputLine = [Console]::ReadLine()
+        
+        # Exit if null (EOF)
+        if ($inputLine -eq $null) {
+            break
+        }
+        
+        $request = $null
+        $requestId = $null
+        
+        try {
+            # Parse the JSON-RPC request
+            $request = $inputLine.Trim() | ConvertFrom-Json
+            $requestId = $request.id
+            
+            # Validate basic JSON-RPC structure
+            if (-not $request.jsonrpc -or $request.jsonrpc -ne "2.0") {
+                throw "Invalid JSON-RPC version"
+            }
+            
+            # Handle notifications (no id field, no response required)
+            if ($requestId -eq $null -or $requestId.GetType().Name -eq 'DBNull') {
+                if ($request.method -eq 'notifications/initialized') {
+                    # Notifications don't require a response
+                    continue
+                }
+                # Other methods require an ID
+                throw "Missing request ID"
+            }
+            
+            if ($request.method -eq 'initialize') {
+                $initResponse = @{
+                    jsonrpc = "2.0"
+                    result = @{
+                        protocolVersion = "2024-11-05"
+                        serverInfo = @{
+                            name = "databricks-mcp-client"
+                            version = "1.0.0"
+                        }
+                        capabilities = @{
+                            tools = @{}
+                        }
+                    }
+                    id = $requestId
+                }
+                $json = $initResponse | ConvertTo-Json -Depth 10 -Compress
+                Write-Output $json
+                continue
+            }
+            
+            # Forward request to server
+            $response = Invoke-MakeRequest -RequestBody $request
+            
+            # Build a clean JSON-RPC response
+            $finalResponse = @{
+                jsonrpc = "2.0"
+                id = $requestId
+            }
+            
+            # Copy either result or error, but not both
+            if ($response.PSObject.Properties.Name -contains 'result') {
+                $finalResponse.result = $response.result
+            } elseif ($response.PSObject.Properties.Name -contains 'error') {
+                $finalResponse.error = $response.error
+            } else {
+                # If neither result nor error, treat entire response as result
+                $finalResponse.result = $response
+            }
+            
+            $json = $finalResponse | ConvertTo-Json -Depth 10 -Compress
+            Write-Output $json
+            
+        }
+        catch {
+            # Create a proper JSON-RPC error response
+            $errorResponse = @{
+                jsonrpc = "2.0"
+                error = @{
+                    code = -32603
+                    message = $_.Exception.Message
+                }
+                id = $requestId
+            }
+            
+            $json = $errorResponse | ConvertTo-Json -Depth 10 -Compress
+            Write-Output $json
+        }
+    }
+}
+catch {
+    # Handle any unhandled exceptions
+    $errorResponse = @{
+        jsonrpc = "2.0"
+        error = @{
+            code = -32603
+            message = $_.Exception.Message
+        }
+        id = $null
+    }
+    
+    $json = $errorResponse | ConvertTo-Json -Depth 10 -Compress
+    Write-Output $json
+}
 '''
     
     from fastapi.responses import Response
     return Response(
-        content=client_js_content,
-        media_type="application/javascript",
+        content=client_ps_content,
+        media_type="text/plain",
         headers={
-            "Content-Disposition": "attachment; filename=databricks_mcp_client.js"
+            "Content-Disposition": "attachment; filename=databricks_mcp_client.ps1"
         }
     )
 
