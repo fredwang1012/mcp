@@ -9,21 +9,19 @@ print("📍 File path: src/custom_server/app.py")
 import asyncio
 import json
 import os
-
-# Clear OAuth environment variables to prevent conflicts with token-based auth
-oauth_env_vars = ['DATABRICKS_CLIENT_ID', 'DATABRICKS_CLIENT_SECRET']
-for var in oauth_env_vars:
-    if var in os.environ:
-        print(f"🔧 Clearing OAuth env var: {var}")
-        del os.environ[var]
-from typing import Any, Dict, List
+import secrets
+import urllib.parse
+import hashlib
+import base64
+import httpx
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import pytz
 
 import jwt
-from fastapi import FastAPI, Request, HTTPException, Response
-from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
+from fastapi import FastAPI, Request, HTTPException, Response, Form, Query
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from databricks.sdk import WorkspaceClient
 
@@ -41,6 +39,27 @@ DATABRICKS_WAREHOUSE_ID = os.environ.get('DATABRICKS_WAREHOUSE_ID', 'a85c850e762
 
 print(f"🔧 Databricks Host: {DATABRICKS_HOST}")
 print(f"🔧 Warehouse ID: {DATABRICKS_WAREHOUSE_ID}")
+
+# =============================================
+# OAUTH 2.1 CONFIGURATION
+# =============================================
+
+OAUTH_CLIENT_ID = os.environ.get('ENTRA_CLIENT_ID', 'your-client-id')
+OAUTH_CLIENT_SECRET = os.environ.get('ENTRA_CLIENT_SECRET', 'your-client-secret')
+OAUTH_TENANT_ID = os.environ.get('ENTRA_TENANT_ID', 'your-tenant-id')
+OAUTH_REDIRECT_URI = os.environ.get('OAUTH_REDIRECT_URI', 'https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/callback')
+
+# OAuth endpoints for Microsoft Entra ID
+ENTRA_AUTHORITY = f"https://login.microsoftonline.com/{OAUTH_TENANT_ID}"
+ENTRA_AUTHORIZE_URL = f"{ENTRA_AUTHORITY}/oauth2/v2.0/authorize"
+ENTRA_TOKEN_URL = f"{ENTRA_AUTHORITY}/oauth2/v2.0/token"
+
+# OAuth session storage (in production, use Redis or database)
+oauth_sessions = {}
+
+print(f"🔧 OAuth Client ID: {OAUTH_CLIENT_ID}")
+print(f"🔧 OAuth Tenant ID: {OAUTH_TENANT_ID}")
+print(f"🔧 OAuth Redirect URI: {OAUTH_REDIRECT_URI}")
 
 # =============================================
 # TOKEN MANAGER
@@ -1006,6 +1025,40 @@ async def dashboard(request: Request):
             
             <div class="card">
                 <div class="card-title">
+                    <span>🔐</span> OAuth 2.1 Authentication (NEW!)
+                </div>
+                
+                <p style="margin-bottom: 15px; color: #28a745; font-weight: 600;">
+                    ✨ No more manual token management! Use OAuth with Microsoft Entra ID.
+                </p>
+                
+                <div class="instructions">
+                    <h3>🎯 For Claude Code Users:</h3>
+                    <ol>
+                        <li>Claude Code will automatically discover OAuth endpoints</li>
+                        <li>Your browser will open to login with Microsoft</li>
+                        <li>Tokens will be managed automatically</li>
+                        <li>OBO (On-Behalf-Of) permissions still work!</li>
+                    </ol>
+                    
+                    <h3>🔗 OAuth Endpoints:</h3>
+                    <ul>
+                        <li><strong>Discovery:</strong> <code>/.well-known/oauth-authorization-server</code></li>
+                        <li><strong>Authorize:</strong> <code>/authorize</code></li>
+                        <li><strong>Token:</strong> <code>/token</code></li>
+                    </ul>
+                    
+                    <h3>⚙️ Environment Variables (for administrators):</h3>
+                    <div class="code-block" style="font-size: 0.8rem;">
+ENTRA_CLIENT_ID=your-app-registration-client-id
+ENTRA_CLIENT_SECRET=your-app-registration-secret  
+ENTRA_TENANT_ID=your-azure-tenant-id
+OAUTH_REDIRECT_URI=https://your-app-url/callback</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">
                     <span>🛠️</span> Quick Actions
                 </div>
                 
@@ -1013,6 +1066,7 @@ async def dashboard(request: Request):
                     <a href="/debug-headers" target="_blank" class="btn">🔍 Debug Headers</a>
                     <a href="/health" target="_blank" class="btn">❤️ Health Check</a>
                     <a href="/mcp" target="_blank" class="btn">🔗 MCP Endpoint</a>
+                    <a href="/.well-known/oauth-authorization-server" target="_blank" class="btn">🔐 OAuth Discovery</a>
                     <button class="btn" onclick="testConnection()">🧪 Test Connection</button>
                 </div>
                 
@@ -1665,6 +1719,267 @@ async def mcp_get():
             "approach": "sql_with_obo"
         }
     )
+
+# =============================================
+# OAUTH 2.1 ENDPOINTS
+# =============================================
+
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource():
+    """OAuth 2.1 Protected Resource Discovery"""
+    return JSONResponse({
+        "resource": "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com",
+        "authorization_servers": ["https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com"],
+        "scopes_supported": ["mcp:tools", "databricks:read", "databricks:write"],
+        "bearer_methods_supported": ["header"],
+        "resource_documentation": "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/docs"
+    })
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_authorization_server():
+    """OAuth 2.1 Authorization Server Discovery"""
+    return JSONResponse({
+        "issuer": "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com",
+        "authorization_endpoint": "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/authorize",
+        "token_endpoint": "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/token",
+        "scopes_supported": ["mcp:tools", "databricks:read", "databricks:write"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"]
+    })
+
+@app.get("/authorize")
+async def oauth_authorize(
+    response_type: str = Query(...),
+    client_id: str = Query(...),
+    redirect_uri: str = Query(...),
+    scope: str = Query(default="mcp:tools"),
+    state: Optional[str] = Query(default=None),
+    code_challenge: Optional[str] = Query(default=None),
+    code_challenge_method: Optional[str] = Query(default="S256")
+):
+    """OAuth 2.1 Authorization Endpoint - redirects to Microsoft Entra ID"""
+    
+    # Validate parameters
+    if response_type != "code":
+        raise HTTPException(400, "Only 'code' response type supported")
+    
+    if code_challenge_method and code_challenge_method != "S256":
+        raise HTTPException(400, "Only 'S256' code challenge method supported")
+    
+    # Generate session state
+    session_id = secrets.token_urlsafe(32)
+    oauth_sessions[session_id] = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method,
+        "created_at": datetime.now(timezone.utc)
+    }
+    
+    # Build Microsoft Entra ID authorization URL
+    entra_params = {
+        "response_type": "code",
+        "client_id": OAUTH_CLIENT_ID,
+        "redirect_uri": OAUTH_REDIRECT_URI,
+        "scope": "https://adb-1761712055023179.19.azuredatabricks.net/.default offline_access",
+        "state": session_id,
+        "response_mode": "query"
+    }
+    
+    entra_url = f"{ENTRA_AUTHORIZE_URL}?{urllib.parse.urlencode(entra_params)}"
+    return RedirectResponse(url=entra_url)
+
+@app.get("/callback")
+async def oauth_callback(
+    code: Optional[str] = Query(default=None),
+    state: Optional[str] = Query(default=None),
+    error: Optional[str] = Query(default=None),
+    error_description: Optional[str] = Query(default=None)
+):
+    """OAuth callback from Microsoft Entra ID"""
+    
+    if error:
+        return HTMLResponse(f"""
+            <html><body>
+                <h1>OAuth Error</h1>
+                <p>Error: {error}</p>
+                <p>Description: {error_description or 'N/A'}</p>
+            </body></html>
+        """, status_code=400)
+    
+    if not code or not state:
+        return HTMLResponse("<html><body><h1>Missing code or state parameter</h1></body></html>", status_code=400)
+    
+    # Retrieve session
+    session = oauth_sessions.get(state)
+    if not session:
+        return HTMLResponse("<html><body><h1>Invalid or expired session</h1></body></html>", status_code=400)
+    
+    try:
+        # Exchange code for tokens with Microsoft Entra ID
+        async with httpx.AsyncClient() as client:
+            token_data = {
+                "grant_type": "authorization_code",
+                "client_id": OAUTH_CLIENT_ID,
+                "client_secret": OAUTH_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": OAUTH_REDIRECT_URI,
+                "scope": "https://adb-1761712055023179.19.azuredatabricks.net/.default offline_access"
+            }
+            
+            response = await client.post(ENTRA_TOKEN_URL, data=token_data)
+            
+            if response.status_code != 200:
+                return HTMLResponse(f"""
+                    <html><body>
+                        <h1>Token Exchange Failed</h1>
+                        <p>Status: {response.status_code}</p>
+                        <p>Response: {response.text}</p>
+                    </body></html>
+                """, status_code=400)
+            
+            tokens = response.json()
+            
+            # Generate authorization code for the original client
+            auth_code = secrets.token_urlsafe(32)
+            
+            # Store the Databricks token for later exchange
+            oauth_sessions[auth_code] = {
+                **session,
+                "databricks_access_token": tokens.get("access_token"),
+                "databricks_refresh_token": tokens.get("refresh_token"),
+                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=tokens.get("expires_in", 3600))
+            }
+            
+            # Clean up the original session
+            del oauth_sessions[state]
+            
+            # Redirect back to the original client with authorization code
+            redirect_params = {"code": auth_code}
+            if session["state"]:
+                redirect_params["state"] = session["state"]
+            
+            redirect_url = f"{session['redirect_uri']}?{urllib.parse.urlencode(redirect_params)}"
+            return RedirectResponse(url=redirect_url)
+            
+    except Exception as e:
+        return HTMLResponse(f"""
+            <html><body>
+                <h1>OAuth Processing Error</h1>
+                <p>Error: {str(e)}</p>
+            </body></html>
+        """, status_code=500)
+
+@app.post("/exchange-token")
+async def exchange_entra_token(request: Request):
+    """Exchange Entra ID token for Databricks token"""
+    try:
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse({
+                "error": "invalid_request",
+                "error_description": "Missing or invalid Authorization header"
+            }, status_code=400)
+        
+        entra_token = auth_header[7:]  # Remove "Bearer " prefix
+        
+        # Use Databricks token federation to exchange Entra ID token
+        exchange_url = f"{DATABRICKS_HOST}/oidc/v1/token"
+        
+        exchange_data = {
+            "subject_token": entra_token,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "scope": "all-apis"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            exchange_response = await client.post(exchange_url, data=exchange_data)
+            
+            if exchange_response.status_code == 200:
+                tokens = exchange_response.json()
+                return JSONResponse({
+                    "access_token": tokens.get("access_token"),
+                    "token_type": "Bearer",
+                    "expires_in": tokens.get("expires_in", 3600)
+                })
+            else:
+                return JSONResponse({
+                    "error": "token_exchange_failed",
+                    "error_description": f"Databricks token exchange failed: {exchange_response.text}"
+                }, status_code=400)
+                
+    except Exception as e:
+        return JSONResponse({
+            "error": "server_error", 
+            "error_description": str(e)
+        }, status_code=500)
+
+@app.post("/token")
+async def oauth_token(
+    grant_type: str = Form(...),
+    code: Optional[str] = Form(default=None),
+    redirect_uri: Optional[str] = Form(default=None),
+    client_id: Optional[str] = Form(default=None),
+    client_secret: Optional[str] = Form(default=None),
+    code_verifier: Optional[str] = Form(default=None)
+):
+    """OAuth 2.1 Token Endpoint"""
+    
+    if grant_type != "authorization_code":
+        return JSONResponse({
+            "error": "unsupported_grant_type",
+            "error_description": "Only authorization_code grant type is supported"
+        }, status_code=400)
+    
+    if not code:
+        return JSONResponse({
+            "error": "invalid_request",
+            "error_description": "Missing authorization code"
+        }, status_code=400)
+    
+    # Retrieve session with Databricks tokens
+    session = oauth_sessions.get(code)
+    if not session:
+        return JSONResponse({
+            "error": "invalid_grant",
+            "error_description": "Invalid or expired authorization code"
+        }, status_code=400)
+    
+    # Validate client credentials
+    if client_id != session.get("client_id"):
+        return JSONResponse({
+            "error": "invalid_client",
+            "error_description": "Client ID mismatch"
+        }, status_code=400)
+    
+    # Validate PKCE if used
+    if session.get("code_challenge") and code_verifier:
+        # Verify code challenge
+        challenge_bytes = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+        expected_challenge = base64.urlsafe_b64encode(challenge_bytes).decode('utf-8').rstrip('=')
+        
+        if session["code_challenge"] != expected_challenge:
+            return JSONResponse({
+                "error": "invalid_grant",
+                "error_description": "Code verifier does not match challenge"
+            }, status_code=400)
+    
+    # Clean up the session
+    databricks_token = session["databricks_access_token"]
+    del oauth_sessions[code]
+    
+    # Return the Databricks access token as our OAuth token
+    return JSONResponse({
+        "access_token": databricks_token,
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "scope": session.get("scope", "mcp:tools")
+    })
 
 # =============================================
 # STARTUP
