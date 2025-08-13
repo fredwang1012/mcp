@@ -22,6 +22,7 @@ import pytz
 import jwt
 from fastapi import FastAPI, Request, HTTPException, Response, Form, Query
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from databricks.sdk import WorkspaceClient
 
@@ -174,6 +175,65 @@ class TokenManager:
 
 # Create global token manager instance
 token_manager = TokenManager()
+
+# =============================================
+# MCP SESSION MANAGEMENT FOR STREAMABLE HTTP
+# =============================================
+
+import uuid
+from typing import Dict, Any
+from datetime import datetime
+
+# Session storage for MCP connections
+mcp_sessions: Dict[str, Any] = {}
+
+class MCPSessionManager:
+    """Manages MCP sessions for Streamable HTTP protocol"""
+    
+    @staticmethod
+    def create_session() -> str:
+        session_id = str(uuid.uuid4())
+        mcp_sessions[session_id] = {
+            'created_at': datetime.utcnow(),
+            'last_activity': datetime.utcnow(),
+            'transport_state': {},
+            'client_info': {}
+        }
+        print(f"📝 Created MCP session: {session_id}")
+        return session_id
+    
+    @staticmethod
+    def get_session(session_id: str) -> Dict[str, Any]:
+        session = mcp_sessions.get(session_id)
+        if session:
+            session['last_activity'] = datetime.utcnow()
+        return session
+    
+    @staticmethod
+    def cleanup_session(session_id: str):
+        if session_id in mcp_sessions:
+            del mcp_sessions[session_id]
+            print(f"🗑️ Cleaned up MCP session: {session_id}")
+    
+    @staticmethod
+    def cleanup_expired_sessions(max_age_hours: int = 24):
+        """Clean up sessions older than max_age_hours"""
+        now = datetime.utcnow()
+        expired_sessions = []
+        
+        for session_id, session_data in mcp_sessions.items():
+            age = now - session_data['created_at']
+            if age.total_seconds() > (max_age_hours * 3600):
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            MCPSessionManager.cleanup_session(session_id)
+        
+        if expired_sessions:
+            print(f"🧹 Cleaned up {len(expired_sessions)} expired sessions")
+
+# Create global session manager instance
+session_manager = MCPSessionManager()
 
 # =============================================
 # DATABRICKS CLIENT
@@ -599,6 +659,35 @@ app = FastAPI(
 
 # Add proxy headers middleware
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+
+# Add enhanced CORS middleware for Claude.ai integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://claude.ai",
+        "https://claude.com", 
+        "https://claude.anthropic.com",
+        "*"  # Allow all for development - restrict in production
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Authorization", 
+        "Content-Type",
+        "Mcp-Session-Id",
+        "MCP-Protocol-Version",
+        "X-Forwarded-Access-Token",
+        "Origin",
+        "Referer"
+    ],
+    expose_headers=[
+        "Mcp-Session-Id", 
+        "WWW-Authenticate",
+        "Content-Type",
+        "Access-Control-Allow-Origin"
+    ]
+)
 
 print("✅ FastAPI app created!")
 
@@ -1577,9 +1666,9 @@ async def debug_mcp():
 
 @app.post("/mcp")
 async def mcp_endpoint(request: Request):
-    """MCP endpoint using official SDK"""
+    """Enhanced MCP endpoint with Streamable HTTP + your perfect OBO authentication"""
     try:
-        # Update token from request headers
+        # 🎯 Keep your existing perfect token management
         token_manager.update_token_from_request(request)
         
         # Get the request body
@@ -1599,15 +1688,16 @@ async def mcp_endpoint(request: Request):
         request_id = rpc_request.get("id")
         params = rpc_request.get("params", {})
         
-        # Handle notifications (no id field - just acknowledge and return)
-        if request_id is None:
-            print(f"📬 Received notification: {method}")
-            # Notifications don't require a response, just return 200 OK
-            return Response(status_code=200)
+        # 🆕 Add session management for Streamable HTTP
+        session_id = request.headers.get('mcp-session-id')
         
-        if method == "initialize":
-            # Initialize response
-            response = {
+        # Handle session creation for initialize requests or missing session
+        if method == "initialize" or not session_id:
+            # Create new session
+            session_id = session_manager.create_session()
+            print(f"🚀 Initialize request - created session: {session_id}")
+            
+            response_data = {
                 "jsonrpc": "2.0",
                 "result": {
                     "protocolVersion": "2024-11-05",
@@ -1621,12 +1711,41 @@ async def mcp_endpoint(request: Request):
                 },
                 "id": request_id
             }
-            return JSONResponse(response)
+            
+            response = JSONResponse(response_data)
+            response.headers['Mcp-Session-Id'] = session_id
+            response.headers['Access-Control-Expose-Headers'] = 'Mcp-Session-Id'
+            return response
         
-        elif method == "tools/list":
-            # List tools
+        # Validate existing session for non-initialize requests
+        session = session_manager.get_session(session_id)
+        if not session:
+            print(f"❌ Session not found: {session_id}")
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32001, "message": "Session not found - please reinitialize"},
+                    "id": request_id
+                },
+                status_code=404,
+                headers={'Mcp-Session-Id': session_id}
+            )
+        
+        print(f"✅ Using existing session: {session_id}")
+        
+        # Handle notifications (no id field - just acknowledge and return)
+        if request_id is None:
+            print(f"📬 Received notification: {method}")
+            # Notifications don't require a response - return 202 Accepted per spec
+            response = Response(status_code=202)
+            response.headers['Mcp-Session-Id'] = session_id
+            return response
+        
+        # 🎯 Keep all your existing MCP method handling logic
+        if method == "tools/list":
+            # List tools - using your existing perfect implementation
             tools = await list_tools()
-            response = {
+            response_data = {
                 "jsonrpc": "2.0",
                 "result": {
                     "tools": [
@@ -1640,15 +1759,14 @@ async def mcp_endpoint(request: Request):
                 },
                 "id": request_id
             }
-            return JSONResponse(response)
-        
+            
         elif method == "tools/call":
-            # Call tool
+            # Call tool - using your existing perfect implementation with OBO
             tool_name = params.get("name")
             tool_args = params.get("arguments", {})
             
             result = await call_tool(tool_name, tool_args)
-            response = {
+            response_data = {
                 "jsonrpc": "2.0",
                 "result": {
                     "content": [
@@ -1661,41 +1779,41 @@ async def mcp_endpoint(request: Request):
                 },
                 "id": request_id
             }
-            return JSONResponse(response)
-        
+            
         elif method == "resources/list":
             # List resources (empty for now)
-            response = {
+            response_data = {
                 "jsonrpc": "2.0",
                 "result": {
                     "resources": []
                 },
                 "id": request_id
             }
-            return JSONResponse(response)
-        
+            
         elif method == "prompts/list":
-            # List prompts (empty for now)
-            response = {
+            # List prompts (empty for now) 
+            response_data = {
                 "jsonrpc": "2.0",
                 "result": {
                     "prompts": []
                 },
                 "id": request_id
             }
-            return JSONResponse(response)
-        
+            
         else:
             # Unknown method
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32601, "message": f"Method not found: {method}"},
-                    "id": request_id
-                },
-                status_code=400
-            )
-    
+            response_data = {
+                "jsonrpc": "2.0",
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+                "id": request_id
+            }
+        
+        # Return response with session header
+        response = JSONResponse(response_data)
+        response.headers['Mcp-Session-Id'] = session_id
+        response.headers['Access-Control-Expose-Headers'] = 'Mcp-Session-Id'
+        return response
+        
     except Exception as e:
         print(f"❌ MCP endpoint error: {e}")
         return JSONResponse(
@@ -1708,17 +1826,105 @@ async def mcp_endpoint(request: Request):
         )
 
 @app.get("/mcp")
-async def mcp_get():
-    """Handle GET requests to MCP endpoint"""
-    return JSONResponse(
-        {
-            "message": "MCP endpoint",
-            "method": "POST required",
-            "server": "unity-catalog-mcp",
-            "version": "7.7",
-            "approach": "sql_with_obo"
-        }
-    )
+async def mcp_sse_endpoint(request: Request):
+    """MCP SSE stream endpoint for real-time communication with Claude.ai"""
+    try:
+        # Check if client wants SSE (required for Streamable HTTP spec)
+        accept = request.headers.get("accept", "")
+        if "text/event-stream" not in accept:
+            return JSONResponse(
+                status_code=405,
+                content={
+                    "error": "Method not allowed - SSE stream required",
+                    "message": "Use POST for JSON-RPC requests, GET with Accept: text/event-stream for SSE",
+                    "server": "unity-catalog-mcp",
+                    "version": "7.7"
+                }
+            )
+        
+        # 🎯 Keep your existing perfect token management
+        token_manager.update_token_from_request(request)
+        print("🔌 SSE stream requested by client")
+        
+        # Create session for SSE connection
+        session_id = session_manager.create_session()
+        print(f"📡 Created SSE session: {session_id}")
+        
+        async def event_generator():
+            try:
+                # Send initial session info to client
+                initial_message = {
+                    "type": "session_created",
+                    "sessionId": session_id,
+                    "server": "unity-catalog-mcp",
+                    "version": "7.7",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                yield f"data: {json.dumps(initial_message)}\n\n"
+                
+                # Keep connection alive with periodic heartbeat
+                heartbeat_count = 0
+                while True:
+                    await asyncio.sleep(30)  # Heartbeat every 30 seconds
+                    heartbeat_count += 1
+                    
+                    heartbeat_message = {
+                        "type": "heartbeat",
+                        "sessionId": session_id,
+                        "count": heartbeat_count,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    yield f"data: {json.dumps(heartbeat_message)}\n\n"
+                    
+            except asyncio.CancelledError:
+                # Client disconnected - clean up session
+                session_manager.cleanup_session(session_id)
+                print(f"🔌 SSE connection closed for session: {session_id}")
+                
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Accept, Authorization, Content-Type, Mcp-Session-Id",
+                "Access-Control-Expose-Headers": "Mcp-Session-Id",
+                "Mcp-Session-Id": session_id
+            }
+        )
+        
+    except Exception as e:
+        print(f"❌ SSE endpoint error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"SSE setup failed: {str(e)}"}
+        )
+
+@app.delete("/mcp")
+async def mcp_cleanup(request: Request):
+    """Clean up MCP session - part of Streamable HTTP spec"""
+    try:
+        session_id = request.headers.get('mcp-session-id')
+        print(f"🗑️ Cleanup requested for session: {session_id}")
+        
+        if session_id and session_id in mcp_sessions:
+            session_manager.cleanup_session(session_id)
+            print(f"✅ Session {session_id} cleaned up successfully")
+            return Response(status_code=204)  # No Content - success
+        else:
+            print(f"❌ Session {session_id} not found for cleanup")
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Session not found"}
+            )
+            
+    except Exception as e:
+        print(f"❌ Session cleanup error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Session cleanup failed: {str(e)}"}
+        )
 
 # =============================================
 # OAUTH 2.1 ENDPOINTS
