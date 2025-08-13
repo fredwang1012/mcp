@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 import pytz
 
 import jwt
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from databricks.sdk import WorkspaceClient
@@ -1544,6 +1544,12 @@ async def mcp_endpoint(request: Request):
         method = rpc_request.get("method")
         request_id = rpc_request.get("id")
         params = rpc_request.get("params", {})
+        
+        # Handle notifications (no id field - just acknowledge and return)
+        if request_id is None:
+            print(f"📬 Received notification: {method}")
+            # Notifications don't require a response, just return 200 OK
+            return Response(status_code=200)
         
         if method == "initialize":
             # Initialize response
