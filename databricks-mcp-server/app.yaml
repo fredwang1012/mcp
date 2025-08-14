@@ -6,7 +6,15 @@ env:
   - name: DATABRICKS_HOST
     value: "https://adb-1761712055023179.19.azuredatabricks.net"
   - name: DATABRICKS_WAREHOUSE_ID
-    value: "a85c850e7621e163"
+    value: "6af12ef900c45a85"
+  - name: ENTRA_CLIENT_ID
+    value: "YOUR_CLIENT_ID_FROM_AZURE"  # e.g., "12345678-1234-1234-1234-123456789012"
+  - name: ENTRA_CLIENT_SECRET
+    value: "YOUR_CLIENT_SECRET_FROM_AZURE"  # e.g., "abc123~secretvalue"
+  - name: ENTRA_TENANT_ID
+    value: "YOUR_TENANT_ID_FROM_AZURE"  # e.g., "87654321-4321-4321-4321-210987654321"
+  - name: OAUTH_REDIRECT_URI
+    value: "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/callback"
   - name: LOG_LEVEL
     value: "DEBUG"
   - name: FORWARDED_ALLOW_IPS

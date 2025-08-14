@@ -36,7 +36,7 @@ import mcp.server.stdio
 # =============================================
 
 DATABRICKS_HOST = os.environ.get('DATABRICKS_HOST', 'https://adb-1761712055023179.19.azuredatabricks.net')
-DATABRICKS_WAREHOUSE_ID = os.environ.get('DATABRICKS_WAREHOUSE_ID', 'a85c850e7621e163')
+DATABRICKS_WAREHOUSE_ID = os.environ.get('DATABRICKS_WAREHOUSE_ID', '6af12ef900c45a85')
 
 print(f"🔧 Databricks Host: {DATABRICKS_HOST}")
 print(f"🔧 Warehouse ID: {DATABRICKS_WAREHOUSE_ID}")
@@ -45,9 +45,9 @@ print(f"🔧 Warehouse ID: {DATABRICKS_WAREHOUSE_ID}")
 # OAUTH 2.1 CONFIGURATION
 # =============================================
 
-OAUTH_CLIENT_ID = os.environ.get('ENTRA_CLIENT_ID', 'your-client-id')
-OAUTH_CLIENT_SECRET = os.environ.get('ENTRA_CLIENT_SECRET', 'your-client-secret')
-OAUTH_TENANT_ID = os.environ.get('ENTRA_TENANT_ID', 'your-tenant-id')
+OAUTH_CLIENT_ID = os.environ.get('ENTRA_CLIENT_ID', '')
+OAUTH_CLIENT_SECRET = os.environ.get('ENTRA_CLIENT_SECRET', '')
+OAUTH_TENANT_ID = os.environ.get('ENTRA_TENANT_ID', '')
 OAUTH_REDIRECT_URI = os.environ.get('OAUTH_REDIRECT_URI', 'https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/callback')
 
 # OAuth endpoints for Microsoft Entra ID
@@ -1950,7 +1950,7 @@ async def oauth_authorization_server():
         "token_endpoint": "https://databricks-mcp-server-1761712055023179.19.azure.databricksapps.com/token",
         "scopes_supported": ["mcp:tools", "databricks:read", "databricks:write"],
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"]
     })
@@ -2132,14 +2132,56 @@ async def oauth_token(
     redirect_uri: Optional[str] = Form(default=None),
     client_id: Optional[str] = Form(default=None),
     client_secret: Optional[str] = Form(default=None),
-    code_verifier: Optional[str] = Form(default=None)
+    code_verifier: Optional[str] = Form(default=None),
+    refresh_token: Optional[str] = Form(default=None)
 ):
-    """OAuth 2.1 Token Endpoint"""
+    """OAuth 2.1 Token Endpoint with Refresh Token Support"""
     
-    if grant_type != "authorization_code":
+    # Handle refresh token grant
+    if grant_type == "refresh_token":
+        if not refresh_token:
+            return JSONResponse({
+                "error": "invalid_request",
+                "error_description": "Missing refresh_token"
+            }, status_code=400)
+        
+        try:
+            # Exchange refresh token for new access token with Entra ID
+            async with httpx.AsyncClient() as client:
+                refresh_data = {
+                    "grant_type": "refresh_token",
+                    "client_id": OAUTH_CLIENT_ID,
+                    "client_secret": OAUTH_CLIENT_SECRET,
+                    "refresh_token": refresh_token,
+                    "scope": "https://adb-1761712055023179.19.azuredatabricks.net/.default offline_access"
+                }
+                
+                response = await client.post(ENTRA_TOKEN_URL, data=refresh_data)
+                
+                if response.status_code == 200:
+                    tokens = response.json()
+                    return JSONResponse({
+                        "access_token": tokens.get("access_token"),
+                        "token_type": "Bearer",
+                        "expires_in": tokens.get("expires_in", 3600),
+                        "refresh_token": tokens.get("refresh_token", refresh_token),
+                        "scope": "mcp:tools"
+                    })
+                else:
+                    return JSONResponse({
+                        "error": "invalid_grant",
+                        "error_description": "Failed to refresh token"
+                    }, status_code=400)
+        except Exception as e:
+            return JSONResponse({
+                "error": "server_error",
+                "error_description": str(e)
+            }, status_code=500)
+    
+    elif grant_type != "authorization_code":
         return JSONResponse({
             "error": "unsupported_grant_type",
-            "error_description": "Only authorization_code grant type is supported"
+            "error_description": "Only authorization_code and refresh_token grant types are supported"
         }, status_code=400)
     
     if not code:
@@ -2184,6 +2226,7 @@ async def oauth_token(
         "access_token": databricks_token,
         "token_type": "Bearer",
         "expires_in": 3600,
+        "refresh_token": session.get("databricks_refresh_token", databricks_token),  # Include refresh token
         "scope": session.get("scope", "mcp:tools")
     })
 
