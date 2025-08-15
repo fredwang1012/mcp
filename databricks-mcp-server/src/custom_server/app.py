@@ -37,7 +37,7 @@ import mcp.server.stdio
 # =============================================
 
 DATABRICKS_HOST = os.environ.get('DATABRICKS_HOST', 'https://adb-1761712055023179.19.azuredatabricks.net')
-DATABRICKS_WAREHOUSE_ID = os.environ.get('DATABRICKS_WAREHOUSE_ID', 'a85c850e7621e163')
+DATABRICKS_WAREHOUSE_ID = os.environ.get('DATABRICKS_WAREHOUSE_ID', '6af12ef900c45a85')
 
 print(f"🔧 Databricks Host: {DATABRICKS_HOST}")
 print(f"🔧 Warehouse ID: {DATABRICKS_WAREHOUSE_ID}")
